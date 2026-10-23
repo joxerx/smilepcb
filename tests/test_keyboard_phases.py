@@ -3,6 +3,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+from smilepcb.runtime import SUPPORT
+
 from smilepcb.keyboard_layout import parse_layout
 from smilepcb.keyboard_model import design
 
@@ -14,6 +17,10 @@ def model():
     return design(parse_layout((fixture/'layout.kle.json').read_text(),json.loads((fixture/'keyboard.json').read_text())),controller_origin_mm=(0,0))
 
 
+@pytest.mark.skipif(
+    not (SUPPORT / "symbols/MCU_ST_STM32F0.kicad_sym").is_file(),
+    reason="Integration check needs the KiCad STM32 symbol library",
+)
 def test_staged_nets_follow_physical_pin_roles_and_the_selected_rgb_chain():
     from smilepcb.keyboard_phases import ordered_nets
     cfg=model();parts={part['ref']:part for part in cfg['parts']};mcu=parts['U_MCU']

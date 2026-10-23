@@ -75,8 +75,10 @@ It does not yet expose the full STM32 generator.
 .venv/bin/python -m pytest -q
 ```
 
-The included tests run without KiCad. Native PCB/firmware validation is separate
-and needs the toolchain in the build guide. CI checks Python 3.11/3.14 and packaging.
+The suite has 69 portable tests and one optional integration check that needs
+the KiCad STM32 symbol library. Without KiCad, that check is skipped. Native
+PCB/firmware validation is separate and needs the toolchain in the build guide.
+CI checks Python 3.11/3.14 and packaging.
 
 - `smilepcb/`: circuit model, native workers, routing, validation, CLI and MCP.
 - `recipes/stm32/`: executable generation recipe and two input layouts.

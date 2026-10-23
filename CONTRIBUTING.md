@@ -46,8 +46,9 @@ python3 -m venv .venv
   tests/test_staged_generated_pipeline.py tests/test_keyboard_phases.py
 ```
 
-These tests run without KiCad or generated CAD inputs. Native integration
-needs the explicit toolchain and public sources described in the
+Without KiCad, 69 tests run and one symbol-library integration check is
+skipped. Native integration needs the explicit toolchain and public sources
+described in the
 [STM32 guide](docs/workflows/stm32.md). Do not replace a required native
 check with a mock and call the board verified.
 
