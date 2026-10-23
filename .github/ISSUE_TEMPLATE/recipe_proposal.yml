@@ -1,0 +1,33 @@
+name: Recipe proposal
+description: Propose a community-backed circuit, placement or routing recipe.
+title: "recipe: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Recipe and use case
+      description: Which repeatable keyboard-design operation should this automate?
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Public sources and licensing
+      description: Exact upstream revisions, datasheets, license notices and evidence of assembled hardware if available.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Electrical and mechanical constraints
+      description: Parts/pinout, voltage/current, switch profile, clearances, assembly side, layers and tool versions.
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Validation and failure cases
+      description: How to check the recipe, cases it must reject, and which claims remain untested.
+    validations:
+      required: true

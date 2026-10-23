@@ -1,0 +1,24 @@
+name: Feature request
+description: Describe a concrete user workflow and its missing capability.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What are you trying to do, and where does the current workflow stop?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Inputs, expected output and a concrete success criterion.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints
+      description: Existing tools/workarounds, hardware/toolchain constraints and relevant public references.

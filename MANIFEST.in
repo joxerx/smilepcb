@@ -1,0 +1,5 @@
+include LICENSE THIRD_PARTY_NOTICES.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md
+recursive-include docs *.md *.json
+recursive-include recipes *.py *.json
+recursive-include examples *.json
+recursive-include tests *.py

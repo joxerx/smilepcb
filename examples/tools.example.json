@@ -1,0 +1,10 @@
+{
+  "kicad_app": "/Applications/KiCad/KiCad.app",
+  "java": "/absolute/path/to/java",
+  "freerouting_jar": "/absolute/path/to/freerouting-2.5.0.jar",
+  "qmk_home": "/absolute/path/to/qmk_firmware",
+  "qmk_bin": "/absolute/path/to/qmk",
+  "arm_gcc": "/absolute/path/to/arm-none-eabi-gcc",
+  "compiler_libraries": [],
+  "dfu_suffix": "/absolute/path/to/dfu-suffix"
+}

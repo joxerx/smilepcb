@@ -1,0 +1,30 @@
+[
+  {
+    "path": "footprints/marbastlib-mx.pretty/LED_MX_6028R.kicad_mod",
+    "url": "https://github.com/ebastler/marbastlib/blob/main/footprints/marbastlib-mx.pretty/LED_MX_6028R.kicad_mod",
+    "blob_sha1": "ede4c6105791b8fa9f1ffb20d16f01a33ef6b36e",
+    "sha256": "f8c3283b14111c0783b51ce0c4f2cb3ec59e471a7b614dbf60c257666e7f388c",
+    "filename": "LED_MX_6028R.kicad_mod"
+  },
+  {
+    "path": "footprints/marbastlib-mx.pretty/SW_MX_HS_CPG151101S11_1u.kicad_mod",
+    "url": "https://github.com/ebastler/marbastlib/blob/main/footprints/marbastlib-mx.pretty/SW_MX_HS_CPG151101S11_1u.kicad_mod",
+    "blob_sha1": "be72a792c1931ea7860b8eeb16343972806ecdce",
+    "sha256": "2fdc8fb29212c82dfe4409f9751ee46081a84cd30f62f9a9f1fdd0a27760ae24",
+    "filename": "SW_MX_HS_CPG151101S11_1u.kicad_mod"
+  },
+  {
+    "path": "symbols/marbastlib-mx.kicad_sym",
+    "url": "https://github.com/ebastler/marbastlib/blob/main/symbols/marbastlib-mx.kicad_sym",
+    "blob_sha1": "8bb5dd786a3b7fa259de4818d49c7a3bb8b1cdf1",
+    "sha256": "cd4b15c99ab7d05c32235457efbf29630132631a76974e1adff854961707321b",
+    "filename": "marbastlib-mx.kicad_sym"
+  },
+  {
+    "path": "LICENSE",
+    "url": "https://github.com/ebastler/marbastlib/blob/main/LICENSE",
+    "blob_sha1": "4fe041e077a8179e50d8d068fb5803cf1f80abba",
+    "sha256": "6e471d647db50527d0c75ee5f1a55a74012ab177c73282bef0bdc7f6562b7ded",
+    "filename": "LICENSE"
+  }
+]

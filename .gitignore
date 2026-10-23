@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.lab/
+.DS_Store
+*.kicad_pcb
+*.kicad_sch
+*.kicad_pro
+*.kicad_prl
+*.net
+*.uf2
+*.elf
+*.bin
+*.hex
+*-backups/
+build/
+dist/
+
+# Local tool configuration and experiment outputs
+.lab/
+.env
+.env.*
+!.env.example
+*.log
+
+# Also ignore a local virtualenv symlink.
+.venv

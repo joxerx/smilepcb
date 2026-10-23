@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem with a supported workflow.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic or redistributable inputs. Remove credentials and machine paths from logs.
+        For security-sensitive findings, follow SECURITY.md.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and environment
+      description: SmilePCB commit/version, OS/architecture, Python, KiCad and relevant QMK/Freerouting versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Exact command, supplied fixture/profile or a minimal redistributable input with provenance.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: First failing stage, exit code and native findings if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Include a short relevant excerpt. Screenshots do not replace native reports.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and removed credentials, machine paths and non-redistributable material.
+          required: true
