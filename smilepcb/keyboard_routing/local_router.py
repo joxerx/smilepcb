@@ -8,6 +8,9 @@ import time
 from smilepcb.native_worker import p
 from .safety import prepare_added_via
 from .generation import current_generation_profile
+from smilepcb.copper_obstacles import copper_graphics,own_clearance
+from smilepcb.routing_quality import current_quality,ranked_paths
+from smilepcb.keyboard_exchange import npth_exchange_clearance_nm
 
 
 def xy(v): return (v.x,v.y)
@@ -15,9 +18,10 @@ def vec(v): return p.VECTOR2I(*v)
 def distance(a,b): return math.hypot(a[0]-b[0],a[1]-b[1])
 
 
-def paths(a,b):
+def paths(a,b,*,octile_only=False):
     """Straight, 45-degree, then symmetric local doglegs in increasing radius."""
-    yield [a,b]
+    dx,dy=b[0]-a[0],b[1]-a[1]
+    if not octile_only or not dx or not dy or abs(dx)==abs(dy):yield [a,b]
     yield [a,(a[0],b[1]),b]
     yield [a,(b[0],a[1]),b]
     dx,dy=b[0]-a[0],b[1]-a[1];m=min(abs(dx),abs(dy))
@@ -34,6 +38,7 @@ class LocalRouter:
     def __init__(self,board,deadline=None,compact=False,ignored_copper=(),track_width_nm=None):
         self.deadline=deadline;self.compact=compact
         self.generation=current_generation_profile()
+        self.quality=current_quality()
         rules=board.GetDesignSettings()
         self.track_width=max(p.FromMM(.2),rules.m_TrackMinWidth) if track_width_nm is None else track_width_nm
         if type(self.track_width) is not int or self.track_width<max(1,rules.m_TrackMinWidth):
@@ -48,6 +53,8 @@ class LocalRouter:
                            p.FromMM(.5) if compact else p.FromMM(.6))
         self.board=board;self.cell=p.FromMM(4);self.buckets={p.F_Cu:{},p.B_Cu:{}}
         self.minimum_clearance=rules.m_MinClearance
+        self.native_hole_clearance=max(p.FromMM(.25),rules.m_HoleClearance)
+        self.hole_clearances={}
         self.net_clearances={}
         self.holes={};self.solder_lands={};self.edges=[];self.edge_buckets={};self.added=[]
         self.outline=p.SHAPE_POLY_SET()
@@ -56,6 +63,9 @@ class LocalRouter:
             for pad in fp.Pads():self.index(pad)
         for t in board.GetTracks():
             if t.m_Uuid.AsString() not in ignored_copper:self.index(t)
+        for uid,shape,net,layer in copper_graphics(board):
+            for cell in self.cells(shape.BBox(),self.minimum_clearance+1000):
+                self.buckets[layer].setdefault(cell,[]).append((uid,shape,net,self.minimum_clearance+1000))
         from smilepcb.routing_style import edge_shapes
         for edge in edge_shapes(board):
             self.edges.append(edge)
@@ -82,7 +92,7 @@ class LocalRouter:
         for layer in self.buckets:
             if item.IsOnLayer(layer):
                 shape=item.GetEffectiveShape(layer)
-                clearance=max(self.minimum_clearance,item.GetOwnClearance(layer),item.GetLocalClearance() or 0)+1000
+                clearance=own_clearance(item,layer,self.minimum_clearance)
                 self.net_clearances[item.GetNetname()]=max(self.net_clearances.get(item.GetNetname(),0),clearance)
                 for cell in self.cells(shape.BBox(),max(clearance,p.FromMM(.5))):
                     self.buckets[layer].setdefault(cell,[]).append((uid,shape,item.GetNetname(),clearance))
@@ -94,7 +104,12 @@ class LocalRouter:
         elif isinstance(item,p.PCB_VIA):hole=item.GetEffectiveHoleShape()
         else:hole=None
         if hole:
-            for cell in self.cells(hole.BBox(),p.FromMM(.5)):
+            gap=self.native_hole_clearance+1000
+            if (self.generation.name=='dsn-safe-v1' and isinstance(item,p.PAD) and
+                item.GetAttribute()==p.PAD_ATTRIB_NPTH and drill.x==drill.y):
+                gap=max(gap,npth_exchange_clearance_nm(self.native_hole_clearance,drill.x))
+            self.hole_clearances[uid]=gap
+            for cell in self.cells(hole.BBox(),max(p.FromMM(.5),gap)):
                 self.holes.setdefault(cell,[]).append((uid,hole,item.GetNetname()))
 
     def clear(self,shape,layer,net,via=False):
@@ -125,7 +140,7 @@ class LocalRouter:
                 seen_edges.add(key)
                 if p.SHAPE.Collide(shape,edge,self.edge_clearance):yield 'board-edge'
         seen=set()
-        for cell in self.cells(box):
+        for cell in self.cells(box,max(self.net_clearances.get(net,0),self.generation.foreign_copper_clearance_nm)):
             for uid,other,othernet,gap in self.buckets[layer].get(cell,[]):
                 if uid in seen or othernet==net:continue
                 seen.add(uid)
@@ -133,13 +148,13 @@ class LocalRouter:
             for uid,hole,othernet in self.holes.get(cell,[]):
                 if not via and othernet==net:continue
                 # Copper-to-hole is stricter than the drill-to-drill minimum.
-                if p.SHAPE.Collide(shape,hole,p.FromMM(.251)):yield uid
+                if p.SHAPE.Collide(shape,hole,self.hole_clearances[uid]):yield uid
 
     def expired(self):
         return self.deadline is not None and time.monotonic()>=self.deadline
 
     def leg(self,a,b,layer,net):
-        for path in paths(a,b):
+        for path in ranked_paths(paths(a,b,octile_only=self.generation.name=='dsn-safe-v1'),self.quality):
             if self.expired():return None
             path=[v for i,v in enumerate(path) if not i or v!=path[i-1]]
             if all(self.clear(p.SHAPE_SEGMENT(vec(x),vec(y),self.track_width),layer,net)

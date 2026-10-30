@@ -5,6 +5,8 @@ from pathlib import Path
 import sexpdata as sx
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT))
 from smilepcb.keyboard_tools import load_tools,configure_kicad
+from smilepcb.routing_quality import quality_from_args
+quality=quality_from_args(sys.argv[4:])
 tools=load_tools(sys.argv[1]);base=ROOT/'.lab/public-controller'
 for tag in sys.argv[2:4]:
  if not tag or any(part in ('','..','.') for part in tag.split('/')) or Path(tag).is_absolute():
@@ -43,7 +45,7 @@ for name in ('controller-ports.json','key-data-access.json','controller-return-t
  if (source.parent/name).exists():shutil.copy2(source.parent/name,out/name)
 def probe_script(name):return ROOT/'recipes/stm32'/name
 def call(script,operation,tag,**kw):
- result=worker(script,dict(operation=operation,board=str(board),**kw),out/(tag+'.log'));(out/(tag+'.json')).write_text(json.dumps(result,indent=2)+'\n');return result
+ result=worker(script,dict(operation=operation,board=str(board),routing_quality=quality,**kw),out/(tag+'.log'));(out/(tag+'.json')).write_text(json.dumps(result,indent=2)+'\n');return result
 native=rule_checks(project,out/'pre-router-native','keyboard',timeout_s=120)
 if native['erc']['severity'] or native['drc']['severity'].get('error') or native['drc']['schematic_parity']:raise ValueError('Local-block preparation fails native preflight')
 tree=s.read(board);names={node[1]:node[2] for node in tree if s.tag(node)=='net' and len(node)>2}
@@ -135,7 +137,8 @@ fixed_text,fixed_manifest=fixed_copper_exchange(original_text,indices=indices)
 fixed_manifest['diagnosed_indices']=sorted(indices)
 (route/'fixed-copper.json').write_text(json.dumps(fixed_manifest,indent=2)+'\n')
 print('exact fixed objects',len(indices),flush=True)
-pre=[v.replace(str(route/'result.json'),str(route/'preflight-result.json')) for v in cmd]+['--router.autorouter.enabled=false']
+from smilepcb.router_commands import preflight_command
+pre=preflight_command(cmd,result_json=route/'preflight-result.json')
 with (route/'preflight.log').open('w') as log:subprocess.run(pre,stdout=log,stderr=subprocess.STDOUT,timeout=30,check=True)
 stats=json.loads((route/'preflight-result.json').read_text())['board_statistics'];(route/'preflight-summary.json').write_text(json.dumps(stats,indent=2)+'\n');print('router preflight',stats.get('clearance_violations'),flush=True)
 conflicts=stats.get('clearance_violations',{})
@@ -170,6 +173,6 @@ if checks['erc']['severity'] or checks['drc']['severity'].get('error') or checks
 if resource['exit_code']!=0:raise RuntimeError('Bounded global router exited unsuccessfully')
 validate_manifest(source)
 (out/'result.json').write_text(json.dumps({'complete':False,'scope':'generated routing diagnostic; completion and firmware pending',
- 'source_unchanged':True,'generation_profile':seed_receipt['generation_profile'],'resources':resource,
+ 'source_unchanged':True,'generation_profile':seed_receipt['generation_profile'],'routing_quality':quality,'global_engine':'freerouting (unchanged)','resources':resource,
  'independent':graph,'native_checks':checks,'roundtrip_accepted':proof['accepted']},indent=2)+'\n')
 print('global generated route gaps',graph['pad_group_gaps'],flush=True)

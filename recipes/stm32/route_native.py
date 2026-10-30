@@ -13,26 +13,30 @@ from smilepcb.keyboard_routing.generation import select_generation_profile
 request=json.load(sys.stdin);select_generation_profile(request.get('generation_profile','native'));path=Path(request['board']);b=p.LoadBoard(str(path));validate(b,request);fps={f.GetReference():f for f in b.GetFootprints()};before=snapshot(b)
 layer=fps['U_MCU'].GetLayer()
 if request['operation']=='usb':
- oracle=Clearance(b);report={}
- for name in ('USB_DP','USB_DM'):
-  graph=copper_graph(b,{name},time.monotonic()+10)
-  component=next(rows for rows in graph['groups'].values() if any(isinstance(graph['nodes'][i]['item'],p.PAD) and graph['nodes'][i]['item'].GetParentFootprint().GetReference()=='U_MCU' for i in rows))
-  starts=component_frontiers(graph,component,time.monotonic()+5);target=next(d for d in fps['J_UDB'].Pads() if d.GetNetname()==name);end=(target.GetPosition().x,target.GetPosition().y)
-  choices=[]
-  for start in starts:
-   for route in octile_paths(start,end):
-    if all(oracle.clear(a,z,200000,layer,name) for a,z in zip(route,route[1:])):choices.append((sum(math.dist(a,z) for a,z in zip(route,route[1:])),route))
-  if choices:
-   _,route=min(choices);ids=add_path(b,oracle,route,layer,name,200000);report[name]={'points_nm':route,'added_ids':ids,'method':'checked octile'}
-  else:
-   router=LocalRouter(b,deadline=time.monotonic()+15,compact=True);router.grid_step=125000;router.connection_budget_s=5;router.search_budget_s=5;router.heuristic_weight=3
-   router.via_clear=lambda *args:False
-   connected=False
-   for start in sorted(starts,key=lambda q:math.dist(q,end)):
-    if router.connect(Endpoint(start,layer,name),target):connected=True;break
-   if not connected:raise ValueError('Existing router found no single-layer USB join for '+name)
-   report[name]={'added_ids':router.added,'method':'existing single-layer grid search'}
-  oracle=Clearance(b)
+ from smilepcb.usb_pair import try_joint_pair
+ report=try_joint_pair(b,('USB_DP','USB_DM'),source_ref='U_MCU',target_ref='J_UDB',
+                       layer=layer,deadline=time.monotonic()+20)
+ if report is None:
+  oracle=Clearance(b);report={}
+  for name in ('USB_DP','USB_DM'):
+   graph=copper_graph(b,{name},time.monotonic()+10)
+   component=next(rows for rows in graph['groups'].values() if any(isinstance(graph['nodes'][i]['item'],p.PAD) and graph['nodes'][i]['item'].GetParentFootprint().GetReference()=='U_MCU' for i in rows))
+   starts=component_frontiers(graph,component,time.monotonic()+5);target=next(d for d in fps['J_UDB'].Pads() if d.GetNetname()==name);end=(target.GetPosition().x,target.GetPosition().y)
+   choices=[]
+   for start in starts:
+    for route in octile_paths(start,end):
+     if all(oracle.clear(a,z,200000,layer,name) for a,z in zip(route,route[1:])):choices.append((sum(math.dist(a,z) for a,z in zip(route,route[1:])),route))
+   if choices:
+    _,route=min(choices);ids=add_path(b,oracle,route,layer,name,200000);report[name]={'points_nm':route,'added_ids':ids,'method':'checked octile'}
+   else:
+    router=LocalRouter(b,deadline=time.monotonic()+15,compact=True);router.grid_step=125000;router.connection_budget_s=5;router.search_budget_s=5;router.heuristic_weight=3
+    router.via_clear=lambda *args:False
+    connected=False
+    for start in sorted(starts,key=lambda q:math.dist(q,end)):
+     if router.connect(Endpoint(start,layer,name),target):connected=True;break
+    if not connected:raise ValueError('Existing router found no single-layer USB join for '+name)
+    report[name]={'added_ids':router.added,'method':'existing single-layer grid search'}
+   oracle=Clearance(b)
  from smilepcb.usb_pair import balance_pair
  from smilepcb.keyboard_native import verify_usb_pair
  balance=balance_pair(b,('USB_DP','USB_DM'),editable_ids=[uid for item in report.values() for uid in item['added_ids']])

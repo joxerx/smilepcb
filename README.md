@@ -9,10 +9,15 @@ SmilePCB combines reusable circuit rules, component placement, GPIO assignment,
 routing and native checks. It builds on public keyboard designs and established
 community tools rather than replacing KiCad or QMK.
 
-**0.1.0 is an experimental developer release.** The supplied 61-key and 68-key
-layouts passed the software workflow: two copper layers, zero native ERC/DRC
-findings under the [documented rule profile](docs/workflows/stm32.md#rule-scope),
-zero independent connectivity gaps and clean matching QMK builds.
+**0.2.0rc1 is experimental; repeated full-board qualification did not pass.**
+One fresh 61-key build and one fresh 68-key build passed the software workflow:
+two copper layers, zero native ERC/DRC findings under the
+[documented rule profile](docs/workflows/stm32.md#rule-scope), zero independent
+connectivity gaps and clean matching QMK builds. A second 68-key build stopped
+with five matrix connections remaining. The series stopped before the fourth
+planned run. See the [measured results](docs/qualification/0.2.0rc1.json).
+Completion and identical routing are not guaranteed, even for the supplied
+fixtures. Incomplete runs retain diagnostics and are not accepted outputs.
 Generated hardware has not been fabricated or tested.
 
 ## Supported workflow
@@ -24,7 +29,7 @@ Generated hardware has not been fabricated or tested.
 - KiCad schematic/PCB/project, BOM, firmware sources, compiled firmware and checks.
 
 Start with the supplied `ansi61` or `compact68` layout. Arbitrary KLE layouts,
-controller families and existing boards are outside the qualified scope of 0.1.0.
+controller families and existing boards are outside this candidate workflow.
 A layout also needs a `keyboard.json` sidecar for its electrical/firmware choices.
 
 ## Quick start
@@ -36,7 +41,6 @@ Other platforms have not been checked for native operations.
 ```sh
 git clone https://github.com/joxerx/smilepcb.git
 cd smilepcb
-git checkout v0.1.0
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
 ```
@@ -49,7 +53,8 @@ external tools and fetch the pinned public controller source, then run:
   .lab/tools.json first-ansi61 \
   --fixture ansi61 --native-staged \
   --process-profile fr4-2l-1oz-0p5-0p2 \
-  --optimize-matrix-gpio --completion-budget-s 3600
+  --optimize-matrix-gpio --completion-budget-s 3600 \
+  --routing-quality turns
 ```
 
 For the other supplied layout, use `--fixture compact68` and a new run tag.
@@ -57,6 +62,23 @@ Results go under `.lab/public-controller/<tag>/`. Existing tags are not overwrit
 The command accepts a result only after native rule, connectivity and firmware
 checks; failed runs retain diagnostics. Runtime and routing success depend on the
 layout and toolchain. The completion budget is not a deadline for the whole run.
+
+## Candidate routing improvements
+
+The candidate fixes copper artwork/field obstacles and routed-net clearance
+checks. The existing routing policy remains the default. Add
+`--routing-quality turns` to the native staged command to test positive bend
+costs, heading-aware search and ranked simple paths. Both modes share USB
+preparation and the external global router's cost model. Native completion and
+recovery receive the selected mode; result files record it.
+
+Preparation now prefers connected signal banks when placing controller supports,
+tries coupled 45-degree USB joins, and reuses existing local return vias. The
+existing native packing, clearance and source-preservation checks remain required.
+
+This option does not guarantee a complete route, fewer vias or reference-quality
+appearance. It does not change fabrication rules, widths, budgets or admission.
+See the [routing policy](docs/workflows/stm32.md#routing-quality).
 
 ## CLI and MCP
 
@@ -75,9 +97,10 @@ It does not yet expose the full STM32 generator.
 .venv/bin/python -m pytest -q
 ```
 
-The suite has 69 portable tests and one optional integration check that needs
-the KiCad STM32 symbol library. Without KiCad, that check is skipped. Native
-PCB/firmware validation is separate and needs the toolchain in the build guide.
+Portable policy and driver tests run without native CAD. Native geometry tests
+are enabled with `SMILEPCB_KICAD_PYTHON` pointing to KiCad's bundled interpreter;
+a separate symbol-library check is also optional. Full PCB/firmware qualification
+requires the toolchain in the build guide.
 CI checks Python 3.11/3.14 and packaging.
 
 - `smilepcb/`: circuit model, native workers, routing, validation, CLI and MCP.

@@ -21,7 +21,9 @@ parser.add_argument('--with-fanout',action='store_true',help='Use the stock boun
 parser.add_argument('--routing-candidates',type=int,default=1,choices=range(1,5),help='Compare bounded full-board routes before choosing the best diagnostic')
 parser.add_argument('--optimize-matrix-gpio',action='store_true',help='Assign safe matrix GPIOs by actual native pad geometry')
 parser.add_argument('--completion-budget-s',type=int,default=3600,choices=range(120,3601))
+parser.add_argument('--routing-quality',choices=('legacy','turns'),default='legacy',help='Optional native path cost: length plus a positive bend penalty')
 args=parser.parse_args()
+if args.routing_quality!='legacy' and not args.native_staged:parser.error('Routing quality requires --native-staged')
 if args.native_staged and args.process_profile is None:parser.error('Native staged routing requires an explicit process profile')
 if args.native_staged and (args.joint_board or args.joint_controller or args.with_fanout or args.routing_candidates!=1):parser.error('Native staging cannot be combined with global routing modes')
 if args.native_staged and args.stop_after_placement:parser.error('Native staging cannot stop before controller interface verification')
@@ -120,16 +122,16 @@ else:
     if args.stop_after_placement:
         print('Controller access accepted; full routing not requested in this diagnostic invocation',flush=True)
         raise SystemExit(0)
-    stage('route',[sys.executable,str(scripts/('route.py' if args.native_staged else 'route_legacy.py')),args.tools,args.tag+'/routed',args.tag+'/layouts',fixture]+(['--joint-board','--editable-routing'] if args.joint_board else [])+(['--with-fanout'] if args.with_fanout else []),1800 if args.native_staged else 1000)
+    stage('route',[sys.executable,str(scripts/('route.py' if args.native_staged else 'route_legacy.py')),args.tools,args.tag+'/routed',args.tag+'/layouts',fixture]+(['--routing-quality',args.routing_quality] if args.native_staged else [])+(['--joint-board','--editable-routing'] if args.joint_board else [])+(['--with-fanout'] if args.with_fanout else []),1800 if args.native_staged else 1000)
 checks=json.loads((out/'routed/native-checks/summary.json').read_text())
 if checks['erc']['severity'] or checks['drc']['severity'].get('error') or checks['drc']['schematic_parity']:
     (out/'failure.json').write_text(json.dumps({'complete':False,'stage':'post-router native rules','checks':checks},indent=2)+'\n')
     raise ValueError('Native post-router errors must be resolved before completion/firmware work')
-stage('complete',[sys.executable,str(scripts/'complete.py'),args.tools,args.tag+'/routed',args.tag+'/finished',fixture,'--budget-s',str(args.completion_budget_s)],args.completion_budget_s+180)
+stage('complete',[sys.executable,str(scripts/'complete.py'),args.tools,args.tag+'/routed',args.tag+'/finished',fixture,'--budget-s',str(args.completion_budget_s),'--routing-quality',args.routing_quality],args.completion_budget_s+180)
 result=json.loads((out/'finished/result.json').read_text())
 assert result['complete'] and result['independent']['pad_group_gaps']==0
 assert result['independent']['copper_layers']==2
 assert digest(donor)=='984473f03db99eda31c3b5f12a3bb2e3d07199ed8e2577d0f6cd78b123639b82'
 result.update(entrypoint='recipes/stm32/generate.py',fresh_from_kle=True,fixture=fixture,input_key_count=len(validated_layout['keys']),placement_attempts=attempts,
-              cold_history=history,cold_elapsed_s=time.monotonic()-started,donor_unchanged=True)
+              cold_history=history,cold_elapsed_s=time.monotonic()-started,donor_unchanged=True,routing_quality=args.routing_quality)
 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print('Fresh KLE -> PCB -> QMK accepted',flush=True)

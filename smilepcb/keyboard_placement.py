@@ -55,3 +55,21 @@ def rgb_chain(layout, source):
     return list(order),{'method':'serpentine cycle with shortest driver lead and cut',
                        'estimated_path_mm':length,'input_lead_mm':math.dist(source,positions[order[0]]),
                        'driver_position_mm':list(source)}
+
+
+def support_signal_preference(own_pads,contacts,plane_nets,fallback):
+    """Prefer the connected signal bank before native obstacle-aware packing.
+
+    Pad positions are local offsets at the candidate's initial orientation;
+    contact positions are the actual already placed core/support geometry.
+    Each signal has equal weight, independent of its number of power pads.
+    This is a preference, not a routing or clearance acceptance decision.
+    """
+    goals={}
+    for signal,own in own_pads:
+        if not signal or signal in plane_nets or signal.startswith(('+','unconnected-','NC_')):continue
+        for net,position in contacts:
+            if net==signal:goals.setdefault(signal,[]).append(tuple(position[i]-own[i] for i in (0,1)))
+    if not goals:return fallback,[]
+    per_signal=[tuple(sum(q[i] for q in rows)/len(rows) for i in (0,1)) for rows in goals.values()]
+    return tuple(round(sum(q[i] for q in per_signal)/len(per_signal)) for i in (0,1)),sorted(goals)

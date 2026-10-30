@@ -14,7 +14,7 @@ from .safety import require_via_land_clearance
 
 
 def _select(domains,compatible,deadline,max_states):
-    """Forward-check the remaining physical interfaces before selecting one."""
+    """Score and forward-check every remaining physical interface."""
     cache={};states=0;stats={'max_assigned':0,'deepest_groups':[],'last_conflict':None,'backjumps':0}
     def allowed(i,a,j,mask):
         key=(i,a,j)
@@ -34,7 +34,7 @@ def _select(domains,compatible,deadline,max_states):
             raise TimeoutError('Joint port search budget exhausted')
         i=min(masks,key=lambda k:(bin(masks[k]).count('1'),k));bits=masks[i]
         conflicts=set(causes[i])
-        neighbours=sorted((j for j in masks if j!=i),key=lambda j:(bin(masks[j]).count('1'),j))[:8]
+        neighbours=sorted((j for j in masks if j!=i),key=lambda j:(bin(masks[j]).count('1'),j))
         values=[]
         while bits:
             bit=bits & -bits;bits^=bit;a=bit.bit_length()-1
@@ -70,13 +70,29 @@ def _select(domains,compatible,deadline,max_states):
     return result,stats
 
 
-def _compatible_ports(world,a,z,clearance_nm):
+def _port_collides(a,b,clearance_nm,bounds):
+    """Reject separated immutable candidate bounds before exact native checks."""
+    def box(shape):
+        key=id(shape)
+        if key not in bounds:
+            bb=shape.BBox()
+            bounds[key]=(bb.GetLeft(),bb.GetTop(),bb.GetRight(),bb.GetBottom())
+        return bounds[key]
+    aa,bb=box(a),box(b)
+    if (aa[0]>bb[2]+clearance_nm or bb[0]>aa[2]+clearance_nm or
+        aa[1]>bb[3]+clearance_nm or bb[1]>aa[3]+clearance_nm):return False
+    return p.SHAPE.Collide(a,b,clearance_nm)
+
+
+def _compatible_ports(world,a,z,clearance_nm,*,bounds=None):
     """Check actual planned copper and drills before committing a bank."""
     gap=world.generation.via_to_hole_clearance_nm
-    if p.SHAPE.Collide(a['circle'],z['hole'],gap) or p.SHAPE.Collide(z['circle'],a['hole'],gap):return False
+    bounds={} if bounds is None else bounds
+    if (_port_collides(a['circle'],z['hole'],gap,bounds) or
+        _port_collides(z['circle'],a['hole'],gap,bounds)):return False
     if a['net']==z['net']:return True
     clearance_nm=max(clearance_nm,world.generation.foreign_copper_clearance_nm)
-    return not any(face==other and p.SHAPE.Collide(shape,b,clearance_nm)
+    return not any(face==other and _port_collides(shape,b,clearance_nm,bounds)
                    for face,shape in a['shapes'] for other,b in z['shapes'])
 
 
@@ -186,8 +202,10 @@ def route_controller_ports(board,*,controller_refs,mcu_refs,plane_nets=(),usb_ne
             domains.append(sorted(choices,key=lambda c:(c['cost'],c['via_nm'],c['path']))[:max_candidates])
         report['candidate_counts']=[len(rows) for rows in domains]
         report['group_labels']=[{'net':net,'pads':sorted(d.GetParentFootprint().GetReference()+':'+d.GetNumber() for d in pads)} for net,pads in groups]
+        # All candidate shapes stay alive and immutable throughout selection.
+        bounds_cache={}
         def compatible(a,z):
-            return _compatible_ports(world,a,z,clearance_nm)
+            return _compatible_ports(world,a,z,clearance_nm,bounds=bounds_cache)
         selected,stats=_select(domains,compatible,deadline,max_states);report.update(stats)
         if selected is None:
             report['reason']=stats.get('budget_reason','No mutually clear short interfaces within the candidate set');return report

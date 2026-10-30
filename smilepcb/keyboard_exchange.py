@@ -1,12 +1,28 @@
 """Data-checked native NPTH compensation in the temporary router exchange."""
 from decimal import Decimal
 import re
+import math
+
+NPTH_EXTRA_UM=10
+CIRCLE_SIDES=64
+CIRCLE_ROUNDING_GUARD_UM=.02
+
+
+def npth_exchange_clearance_nm(native_clearance_nm,hole_diameter_nm,*,router_clearance_nm=150000):
+    """Generated circular-hole gap enclosing DSN compensation and rounding."""
+    if any(type(v) is not int or v<=0 for v in (native_clearance_nm,hole_diameter_nm,router_clearance_nm)):
+        raise ValueError("Expected positive integer native hole/exchange dimensions")
+    physical=native_clearance_nm+NPTH_EXTRA_UM*1000
+    if router_clearance_nm>=physical:raise ValueError("Unsupported NPTH exchange clearance policy")
+    radius=hole_diameter_nm/2+physical-router_clearance_nm
+    enclosure=math.ceil(radius*(1/math.cos(math.pi/CIRCLE_SIDES)-1)+CIRCLE_ROUNDING_GUARD_UM*1000)
+    return physical+enclosure+1000
 
 
 def adapt_npth_keepouts(text, *, holes_um, native_hole_clearance_um, router_clearance_um):
     holes={Decimal(str(v)) for v in holes_um}
     native=Decimal(str(native_hole_clearance_um)); gap=Decimal(str(router_clearance_um))
-    physical=native+10
+    physical=native+NPTH_EXTRA_UM
     if not holes or native<=0 or gap<=0 or gap>=physical:
         raise ValueError('Unsupported NPTH exchange clearance policy')
     count=0
@@ -69,15 +85,15 @@ def polygonize_circles(text):
         if match[1] is None or any(a<=match.start()<z for a,z in via_ranges):return match[0]
         diameter=float(match[2]);x=float(match[3] or 0);y=float(match[4] or 0)
         if not diameter>0:raise ValueError('Invalid exchange circle diameter')
-        radius=diameter/2;outer=radius/math.cos(math.pi/64)+.02
+        radius=diameter/2;outer=radius/math.cos(math.pi/CIRCLE_SIDES)+CIRCLE_ROUNDING_GUARD_UM
         points=[]
-        for i in range(64):
-            angle=(2*i+1)*math.pi/64
+        for i in range(CIRCLE_SIDES):
+            angle=(2*i+1)*math.pi/CIRCLE_SIDES
             points.extend((f'{x+outer*math.cos(angle):.2f}',f'{y+outer*math.sin(angle):.2f}'))
         count+=1;excess=max(excess,outer-radius+.01)
         return '(polygon '+match[1]+' 0 '+' '.join(points)+')'
     result=re.sub(pattern,convert,text)
-    return result,{'converted_circles':count,'sides':64,'max_radial_excess_um':excess,
+    return result,{'converted_circles':count,'sides':CIRCLE_SIDES,'max_radial_excess_um':excess,
                    'conservative_enclosure':True}
 
 

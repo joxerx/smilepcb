@@ -6,7 +6,7 @@ from smilepcb import native_worker as w
 from smilepcb.keyboard_native import place_diodes
 from smilepcb.keyboard_routing.safety import require_via_land_clearance
 from smilepcb.keyboard_routing.controller_access import route_controller_access
-from smilepcb.keyboard_placement import rgb_chain
+from smilepcb.keyboard_placement import rgb_chain,support_signal_preference
 from recipes.stm32.transfer import copy_copper,mirror_items
 p=w.p
 request=json.load(sys.stdin);started=time.monotonic();stop=started+request['budget_s']
@@ -61,7 +61,18 @@ def add_shape(shape,layer,kind,netname=''):
  box=bbox(shape);entry=(shape,box,kind,netname)
  for x in range(box[0]//cell,box[2]//cell+1):
   for y in range(box[1]//cell,box[3]//cell+1):cells.setdefault((layer,x,y),[]).append(entry)
+def silkscreen_shapes(f):
+ # Ink is a placement constraint on its own face, never a copper obstacle.
+ seen=set()
+ for item in [*f.GraphicalItems(),*f.GetFields()]:
+  uid=item.m_Uuid.AsString();layer=item.GetLayer()
+  if uid in seen or layer not in (p.F_SilkS,p.B_SilkS):continue
+  seen.add(uid)
+  if isinstance(item,p.PCB_TEXT) and not item.IsVisible():continue
+  yield item.GetEffectiveShape(layer),layer
+
 def add_obstacles(f):
+ for shape,layer in silkscreen_shapes(f):add_shape(shape,layer,'ink')
  for layer in (p.F_Cu,p.B_Cu):
   court=f.GetCourtyard(layer)
   if f.GetReference().startswith('STAB'):court=f.GetCourtyard(p.F_Cu)
@@ -88,6 +99,10 @@ def inside(shape):
 def clear(objects):
  for obj in objects:
   if isinstance(obj,p.FOOTPRINT):
+   ink_gap=max(0,rules.m_SilkClearance)+1
+   for shape,layer in silkscreen_shapes(obj):
+    for other,b,kind,name in nearby(shape,layer,ink_gap):
+     if kind=='ink' and box_overlap(bbox(shape),b,ink_gap) and p.SHAPE.Collide(shape,other,ink_gap):return False
    for layer in (p.F_Cu,p.B_Cu):
     shape=obj.GetCourtyard(layer)
     if not shape.OutlineCount():continue
@@ -197,6 +212,12 @@ if pose:
   if part['ref']=='J_UDB':part['side']=board.GetLayerName(next(o for o in core if isinstance(o,p.FOOTPRINT) and o.GetReference()=='U_MCU').GetLayer())
   fp=loaded(part);old=fp.GetPosition();fp.Move(vector(-old.x,-old.y))
   preferred=(pose['origin_nm'][0]+round(part['pcb'][0]*1e6),pose['origin_nm'][1]+round(part['pcb'][1]*1e6))
+  placed_refs={item['ref'] for item in parts}|set(supports)
+  own_pads=[(d.GetNetname(),(d.GetPosition().x,d.GetPosition().y)) for d in fp.Pads() if d.GetNumber()]
+  contacts=[(d.GetNetname(),(d.GetPosition().x,d.GetPosition().y))
+            for neighbour in board.GetFootprints() if neighbour.GetReference() in placed_refs
+            for d in neighbour.Pads() if d.GetNumber()]
+  preferred,anchor_nets=support_signal_preference(own_pads,contacts,set(cfg['plane_nets']),preferred)
   if part['ref']=='J_UDB':
    chip=next(o for o in core if isinstance(o,p.FOOTPRINT) and o.GetReference()=='U_MCU')
    usb=[d.GetPosition() for d in chip.Pads() if d.GetNetname() in ('USB_DM','USB_DP')]
@@ -206,7 +227,7 @@ if pose:
    ca=chip_data['USB_DP']-chip_data['USB_DM'];cb=connector['USB_DP']-connector['USB_DM'];angle=round((math.degrees(math.atan2(ca.y,ca.x))-math.degrees(math.atan2(cb.y,cb.x)))/90)*90
    fp.Rotate(vector(0,0),p.EDA_ANGLE(angle,p.DEGREES_T));connector=[d.GetPosition() for d in fp.Pads() if d.GetNetname() in ('USB_DM','USB_DP')]
    preferred=(round(mx+dx/length*10000000-sum(q.x for q in connector)/2),round(my+dy/length*10000000-sum(q.y for q in connector)/2))
-  placement,diagnostic=pack([fp],preferred);supports[part['ref']]={'pose':placement,**diagnostic}
+  placement,diagnostic=pack([fp],preferred);supports[part['ref']]={'pose':placement,'preferred_nm':list(preferred),'signal_anchor_nets':anchor_nets,**diagnostic}
   if not placement:failed=part['ref'];break
   add_obstacles(fp)
  result.update(supports=supports,failed_support=failed)

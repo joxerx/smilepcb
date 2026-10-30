@@ -17,11 +17,13 @@ from smilepcb.keyboard_tools import load_tools, configure_kicad
 from smilepcb.keyboard_firmware import file_hashes
 from smilepcb.keyboard_phases import ordered_nets
 from smilepcb.keyboard_routing.generated_seed import write_manifest
+from smilepcb.routing_quality import quality_from_args
 
 PROFILE = "dsn-safe-v1"
 
 
 def main():
+    quality=quality_from_args(sys.argv[5:])
     tools = load_tools(sys.argv[1])
     base = ROOT / ".lab/public-controller"
     source = base / sys.argv[3] / sys.argv[4] / "project"
@@ -43,7 +45,7 @@ def main():
     def call(operation, tag, script=BRIDGE, **kwargs):
         tick = time.perf_counter()
         request = dict(operation=operation, board=str(board),
-                       generation_profile=PROFILE, **kwargs)
+                       generation_profile=PROFILE,routing_quality=quality, **kwargs)
         result = worker(script, request, out / (tag + ".log"), timeout_s=90)
         (out / (tag + ".json")).write_text(json.dumps(result, indent=2) + "\n")
         history.append({"stage": tag, "elapsed_s": time.perf_counter() - tick,
@@ -107,7 +109,7 @@ def main():
             {"complete": False, "reason": native_error}, indent=2) + "\n")
         tag = sys.argv[2] + "/generated-global"
         command = [sys.executable, str(Path(__file__).with_name("route_global.py")),
-                   sys.argv[1], tag, sys.argv[2] + "/prepared-seed"]
+                   sys.argv[1], tag, sys.argv[2] + "/prepared-seed",'--routing-quality',quality]
         print("checked global recovery from immutable generated seed", flush=True)
         with (out / "generated-global.log").open("w") as log:
             subprocess.run(command, cwd=ROOT, env=environment(), stdout=log,
@@ -123,7 +125,7 @@ def main():
         raise ValueError("Routing edited its placed source project")
     result = {"complete": False, "routing_scope": "completion/firmware gates pending",
               "selected_path": selected, "native_attempt_error": native_error,
-              "generation_profile": PROFILE, "elapsed_s": time.perf_counter() - started,
+              "generation_profile": PROFILE,'routing_quality':quality, "elapsed_s": time.perf_counter() - started,
               "history": history, "phases": phases, "rgb_order": cfg["layout"]["rgb_order"],
               "independent": independent, "native_checks": checks,
               "source_unchanged": True, "hardware_tested": False}

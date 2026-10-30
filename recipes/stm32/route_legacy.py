@@ -120,7 +120,8 @@ fixed_text,fixed_manifest=fixed_copper_exchange(original_text,indices=indices)
 fixed_manifest['diagnosed_indices']=sorted(indices)
 (route/'fixed-copper.json').write_text(json.dumps(fixed_manifest,indent=2)+'\n')
 print('exact fixed objects',len(indices),flush=True)
-pre=[v.replace(str(route/'result.json'),str(route/'preflight-result.json')) for v in cmd]+['--router.autorouter.enabled=false']
+from smilepcb.router_commands import preflight_command
+pre=preflight_command(cmd,result_json=route/'preflight-result.json')
 with (route/'preflight.log').open('w') as log:subprocess.run(pre,stdout=log,stderr=subprocess.STDOUT,timeout=30,check=True)
 stats=json.loads((route/'preflight-result.json').read_text())['board_statistics'];(route/'preflight-summary.json').write_text(json.dumps(stats,indent=2)+'\n');print('router preflight',stats.get('clearance_violations'),flush=True)
 conflicts=stats.get('clearance_violations',{})

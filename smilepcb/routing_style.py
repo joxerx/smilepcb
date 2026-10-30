@@ -7,6 +7,7 @@ from collections import defaultdict
 import math
 import time
 from .native_worker import p,snapshot
+from .copper_obstacles import copper_graphics,net_clearances,own_clearance
 
 
 def xy(v):return (v.x,v.y)
@@ -20,7 +21,7 @@ def edge_shapes(board):
     Retain the original board and footprint graphics unchanged.
     """
     for graphic in [*board.GetDrawings(),*(g for fp in board.GetFootprints() for g in fp.GraphicalItems())]:
-        if graphic.GetLayer()==p.Edge_Cuts:
+        if isinstance(graphic,p.PCB_SHAPE) and graphic.GetLayer()==p.Edge_Cuts:
             copy=graphic.Duplicate();copy.SetWidth(0)
             yield copy.GetEffectiveShape()
 
@@ -85,12 +86,15 @@ class Clearance:
         self.edge=max(p.FromMM(.2),rules.m_CopperEdgeClearance)+1000
         self.hole=max(p.FromMM(.25),rules.m_HoleClearance)+1000
         self.gap=max(p.FromMM(.2),rules.m_MinClearance)+1000
+        self.net_clearances=net_clearances(board,rules.m_MinClearance)
         self.copper={p.F_Cu:[],p.B_Cu:[]};self.holes=[];self.edges=[]
         self.outline=p.SHAPE_POLY_SET()
         if not board.GetBoardPolygonOutlines(self.outline,False):raise ValueError('Invalid board outline')
         for fp in board.GetFootprints():
             for pad in fp.Pads():self.index(pad)
         for t in board.GetTracks():self.index(t)
+        for _,shape,net,layer in copper_graphics(board):
+            self.copper[layer].append((shape,net,self.gap))
         self.edges.extend(edge_shapes(board))
         self.areas=[z for z in board.Zones() if z.GetIsRuleArea()]
         for shape,net,layer,gap in filled_zones(board):
@@ -99,7 +103,9 @@ class Clearance:
     def index(self,item):
         for layer,entries in self.copper.items():
             if item.IsOnLayer(layer):
-                entries.append((item.GetEffectiveShape(layer),item.GetNetname(),max(self.gap,item.GetLocalClearance() or 0)))
+                gap=max(self.gap,own_clearance(item,layer,self.board.GetDesignSettings().m_MinClearance))
+                entries.append((item.GetEffectiveShape(layer),item.GetNetname(),gap))
+                self.net_clearances[item.GetNetname()]=max(self.net_clearances.get(item.GetNetname(),0),gap)
         if isinstance(item,p.PAD):
             drill=item.GetDrillSize();hole=item.GetEffectiveHoleShape() if drill.x and drill.y else None
         elif isinstance(item,p.PCB_VIA):hole=item.GetEffectiveHoleShape()
@@ -112,7 +118,7 @@ class Clearance:
         # below enforce its full width without rejecting empty box corners.
         if not self.outline.Contains(p.VECTOR2I((a[0]+b[0])//2,(a[1]+b[1])//2)):return False
         if any(p.SHAPE.Collide(shape,e,self.edge) for e in self.edges):return False
-        if any(othernet!=net and p.SHAPE.Collide(shape,s,gap) for s,othernet,gap in self.copper[layer]):return False
+        if any(othernet!=net and p.SHAPE.Collide(shape,s,max(gap,self.net_clearances.get(net,0))) for s,othernet,gap in self.copper[layer]):return False
         if any(othernet!=net and p.SHAPE.Collide(shape,h,self.hole) for h,othernet in self.holes):return False
         if any(z.IsOnLayer(layer) and z.GetDoNotAllowTracks() and p.SHAPE.Collide(shape,z.Outline(),0) for z in self.areas):return False
         return True

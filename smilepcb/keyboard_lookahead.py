@@ -6,16 +6,26 @@ def gap_signature(missing):
     return tuple(sorted(missing.items()))
 
 
-def provisional_step(before,after,*,seen,depth,max_depth=3):
+def lookahead_limits(elastic):
+    if type(elastic) is not bool:raise ValueError('Lookahead mode must be boolean')
+    return (8,8) if elastic else (3,3)
+
+
+def provisional_step(before,after,*,seen,depth,max_depth=3,gap_ceiling=None):
     gap_signature(before);signature=gap_signature(after)
-    if type(max_depth) is not int or not 1<=max_depth<=3:raise ValueError('Lookahead depth must be bounded by three')
-    allowed=(type(depth) is int and 0<=depth<max_depth and sum(after.values())<=sum(before.values()) and after!=before and signature not in seen)
+    if type(max_depth) is not int or not 1<=max_depth<=8:raise ValueError('Lookahead depth must be bounded by eight')
+    if gap_ceiling is not None and (type(gap_ceiling) is not int or not 1<=gap_ceiling<=8):
+        raise ValueError('Invalid provisional gap ceiling')
+    allowed=(type(depth) is int and 0<=depth<max_depth and sum(after.values())<=(sum(before.values()) if gap_ceiling is None else gap_ceiling) and after!=before and signature not in seen)
     return {'allowed':allowed,'complete':allowed and not after,'protect_healed':set(before)-set(after) if allowed else set()}
 
 
-def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None):
-    """Try at most three non-worsening hops, promoting only checked zero.
+def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None,routing_quality='legacy',elastic=False):
+    """Promote only checked zero; optionally explore bounded temporary gaps.
 
+    Conservative mode retains three non-worsening hops. Elastic mode permits
+    up to eight hops, never exceeding initial+2 gaps (capped at eight), and
+    selects return recovery when the current provisional state needs it.
     The last 180 seconds of the caller's existing budget are reserved for
     final cleanup/acceptance. Every saved intermediate stays under one newly
     allocated disposable root; routing_transaction promotes only the board.
@@ -29,18 +39,23 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
     from .keyboard_build import routing_transaction,NAME,BRIDGE
     from .lab_tools import worker,rule_checks
     from .service import encode
+    from .routing_quality import quality_profile
+    routing_quality=quality_profile(routing_quality).name
+    max_depth,max_initial=lookahead_limits(elastic)
     project=Path(project).resolve();output=Path(output).resolve()
     missing=previous['pad_groups_missing'];gap_signature(missing)
     planes=set(json.loads((project/'.smilepcb-keyboard.json').read_text())['plane_nets'])
     reserve=180;trial_deadline=deadline-reserve
-    if not missing or sum(missing.values())>3 or set(missing)&planes or trial_deadline-time.perf_counter()<90:return previous
+    if not missing or sum(missing.values())>max_initial or (not elastic and set(missing)&planes) or trial_deadline-time.perf_counter()<90:return previous
+    ceiling=min(8,sum(missing.values())+2) if elastic else None
     root=Path(tempfile.mkdtemp(prefix='lookahead-',dir=output));token=secrets.token_hex(24)
-    (root/'.smilepcb-lookahead-owner.json').write_text(encode({'token':token,'source_board':str(project/(NAME+'.kicad_pcb'))}))
+    (root/'.smilepcb-lookahead-owner.json').write_text(encode({'token':token,'source_board':str(project/(NAME+'.kicad_pcb')),'elastic':elastic,'gap_ceiling':ceiling}))
     def remaining():
         value=trial_deadline-time.perf_counter()
         if value<=1:raise TimeoutError('Lookahead exhausted the existing build budget')
         return min(90,value)
     def invoke(operation,tag=None,**request):
+        request.update(routing_quality=routing_quality,elastic=elastic,gap_ceiling=ceiling)
         budget=remaining()
         if native_call is not None:return native_call(operation,tag=tag,**request)
         bridge=Path(__file__).with_name('keyboard_lookahead_native.py') if operation in ('provisional','final_frame') else BRIDGE
@@ -48,7 +63,7 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
         (root/(tag+'.json')).write_text(encode(data));return data
     current=project;seen={gap_signature(missing)};healed=set();history=[];final=None
     announce('bounded disposable routing lookahead')
-    for depth in range(3):
+    for depth in range(max_depth):
         if trial_deadline-time.perf_counter()<90:break
         candidate=root/('hop-'+str(depth))/'project';shutil.copytree(current,candidate)
         data=invoke('provisional',tag='hop-'+str(depth),board=candidate/(NAME+'.kicad_pcb'),
@@ -57,11 +72,16 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
         if data.get('provisional_only') is not True or data.get('accepted_final') is not False:
             raise ValueError('Provisional worker returned a final-acceptance claim')
         if data.get('before')!=missing:raise ValueError('Stale provisional connectivity inventory')
-        decision=provisional_step(missing,data['after'],seen=seen,depth=depth)
+        decision=provisional_step(missing,data['after'],seen=seen,depth=depth,max_depth=max_depth,gap_ceiling=ceiling)
         history.append({**data,'decision':{**decision,'protect_healed':sorted(decision['protect_healed'])}})
         (root/'history.json').write_text(encode({'provisional_only':True,'accepted_final':False,'hops':history}))
         if data.get('saved_trial') is not True or not decision['allowed']:break
-        current=candidate;missing=data['after'];healed.update(decision['protect_healed']);seen.add(gap_signature(missing))
+        current=candidate;missing=data['after'];seen.add(gap_signature(missing))
+        # A return repair changes the available signal corridors. Old generated
+        # reservations must not become permanent obstacles in the new topology;
+        # final frame/partition admission still covers the entire original board.
+        if elastic and data.get('strategy')=='plane_negotiate':healed.clear()
+        else:healed.update(decision['protect_healed'])
         if not missing:final=candidate;break
     if final is None:return previous
     frame=invoke('final_frame',tag='final-frame',board=final/(NAME+'.kicad_pcb'),trial_root=root,owner_token=token,

@@ -62,7 +62,7 @@ def nearest_to_node(node,position):
     return node['points'][0]
 
 
-def copper_graph(board,nets,deadline=None):
+def copper_graph(board,nets,deadline=None,*,include_zones=True):
     phase=['load conductors']
     def budget():
         if deadline is not None and time.monotonic()>=deadline:raise TimeoutError('Native graph budget exhausted: '+phase[0])
@@ -75,7 +75,7 @@ def copper_graph(board,nets,deadline=None):
         else:points=[xy(item.GetPosition())]
         nodes.append(dict(item=item,shapes=layers,points=points,net=item.GetNetname(),zone=False))
     phase[0]='load filled polygons'
-    for zone in board.Zones():
+    for zone in board.Zones() if include_zones else ():
         budget()
         if zone.GetIsRuleArea() or zone.GetNetname() not in nets:continue
         if not zone.IsFilled() or zone.NeedRefill():

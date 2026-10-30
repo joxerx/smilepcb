@@ -40,16 +40,13 @@ Please avoid bundling unrelated changes.
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
-.venv/bin/python -m pytest -q tests/test_cold_fixture.py \
-  tests/test_keyboard_process.py tests/test_seed_junctions.py \
-  tests/test_keyboard_lookahead_policy.py \
-  tests/test_staged_generated_pipeline.py tests/test_keyboard_phases.py
+.venv/bin/python -m pytest -q
 ```
 
-Without KiCad, 69 tests run and one symbol-library integration check is
-skipped. Native integration needs the explicit toolchain and public sources
-described in the
-[STM32 guide](docs/workflows/stm32.md). Do not replace a required native
+Without KiCad, the portable suite runs and native checks are explicitly skipped.
+Set `SMILEPCB_KICAD_PYTHON` to KiCad’s bundled interpreter to enable native
+geometry regressions. Full-board integration needs the explicit toolchain and
+public sources described in the [STM32 guide](docs/workflows/stm32.md). Do not replace a required native
 check with a mock and call the board verified.
 
 Keep host code compatible with Python 3.11+. Native workers must also parse and

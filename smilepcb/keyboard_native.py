@@ -179,8 +179,11 @@ def verify_usb_pair(board):
 
 def run(request):
     from smilepcb.keyboard_routing.generation import generation_profile
-    with generation_profile(request.get('generation_profile','native')):
-        return _run(request)
+    from smilepcb.routing_quality import using_quality_profile
+    with generation_profile(request.get('generation_profile','native')),using_quality_profile(request.get('routing_quality','legacy')) as quality:
+        result=_run(request)
+        result['routing_quality']=quality.name
+        return result
 
 
 def _run(request):
@@ -498,7 +501,9 @@ def _run(request):
                            for pads in sorted(groups.values(),key=lambda rows:(len(rows),sorted(rows)))]
                       for net,groups in members.items()}
         usb=verify_usb_pair(board)
+        from smilepcb.routing_quality import copper_metrics
         return {'copper_layers':board.GetCopperLayerCount(),'pad_groups_missing':gaps,'pad_group_gaps':sum(gaps.values()),'usb_lengths_mm':usb,
+                'copper_metrics':copper_metrics(w.snapshot(board)['tracks']),
                 'disconnected_pad_groups':disconnected,
                 'via_land_checks':land_checks,
                 'all_pin_nets_match':True,'all_key_and_led_centres_match':True}

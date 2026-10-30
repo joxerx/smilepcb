@@ -28,14 +28,7 @@ jobs:
       - name: Install development tools
         run: python -m pip install -e '.[test]' build
       - name: Run tests without native CAD dependencies
-        run: >-
-          python -m pytest -q
-          tests/test_cold_fixture.py
-          tests/test_keyboard_process.py
-          tests/test_seed_junctions.py
-          tests/test_keyboard_lookahead_policy.py
-          tests/test_staged_generated_pipeline.py
-          tests/test_keyboard_phases.py
+        run: python -m pytest -q tests
       - name: Check installed entry points
         run: |
           smilepcb --help

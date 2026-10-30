@@ -79,6 +79,27 @@ def controller_interface_ids(source_project):
     return sorted(set(ids))
 
 
+def pending_interface_ids(board_file,owned_ids,pending_nets):
+    """Keep live reserved copper only on nets whose pads are still separated.
+
+    This releases protection, never deletes geometry. Native cleanup still
+    preserves every pad partition, locked object and explicitly protected ID.
+    """
+    from . import schematic as s
+    owned=set(owned_ids);pending=set(pending_nets)
+    if not owned:return []
+    tree=s.read(board_file)
+    names={node[1]:node[2] for node in tree if s.tag(node)=='net' and len(node)>2}
+    live={}
+    for node in tree:
+        if s.tag(node) not in ('segment','via','arc'):continue
+        uid=str(s.one(node,'uuid')[1])
+        if uid in live:raise ValueError('Duplicate actual copper identity')
+        net=s.one(node,'net')[1]
+        live[uid]=names.get(net,net)
+    return sorted(uid for uid in owned if uid in live and live[uid] in pending)
+
+
 def balanced_candidates(rows,limit):
     """Round-robin nearest alternatives so one crowded net cannot starve others."""
     by_net={}
@@ -99,7 +120,7 @@ def plane_pairs(independent,planes):
     return result
 
 
-def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=()):
+def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=(),routing_quality='legacy'):
     """Keep improving checked transactions; retain all rejected diagnostics."""
     from .service import encode
     from .keyboard_build import routing_transaction,NAME
@@ -134,6 +155,18 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         call('components',tag='unbiased-'+str(i),grid_step_nm=step,connection_budget_s=5,
              relax_preferences=True,completion_search=True,track_width_nm=150000)
         call('stitch',tag='unbiased-stitch-'+str(i));current=call('verify',tag='unbiased-verify-'+str(i))
+    # Completed nets no longer need every provisional outward runway.
+    # Keep unfinished interfaces, but let the native partition-preserving
+    # cleaner retire redundant completed-net tails before local negotiation.
+    if current['pad_group_gaps'] and port_ids:
+        retained=pending_interface_ids(Path(project)/(NAME+'.kicad_pcb'),port_ids,current['pad_groups_missing'])
+        if set(retained)!=set(port_ids):
+            announce('retire completed interface reservations')
+            call('cleanup',tag='completed-interface-cleanup',protected_ids=sorted(set(protected)|set(retained)))
+            verified=call('verify',tag='completed-interface-connectivity')
+            if verified['pad_groups_missing']!=current['pad_groups_missing']:
+                raise ValueError('Interface retirement changed native pad groups')
+            current=verified
     cfg=json.loads((Path(project)/'.smilepcb-keyboard.json').read_text());planes=set(cfg['plane_nets'])
     while current['pad_group_gaps']:
         before=current['pad_group_gaps'];missing=set(current['pad_groups_missing'])
@@ -147,7 +180,7 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         if current['pad_group_gaps']>=before:break
     if current['pad_group_gaps']:
         from .keyboard_lookahead import run_lookahead
-        current=run_lookahead(project,output,current,protected,deadline,announce)
+        current=run_lookahead(project,output,current,protected,deadline,announce,routing_quality=routing_quality)
     if not current['pad_group_gaps']:return current
     # A batch may sacrifice one old signal after joining several returns.
     # Retry native island pairs separately, retaining only checked progress;
@@ -189,4 +222,9 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
     for strategy in ('spokes','route'):
         if not current['pad_group_gaps']:return current
         attempt(strategy)
+    if current['pad_group_gaps']:
+        # Later shifts/detours change the state that the first conservative
+        # lookahead saw. Explore that new topology within the same deadline.
+        current=run_lookahead(project,output,current,protected,deadline,announce,
+                              routing_quality=routing_quality,elastic=True)
     return current

@@ -85,3 +85,22 @@ def test_failed_joint_seed_does_not_start_signals_or_global_router(tmp_path, mon
         driver.main()
     assert not any(op in ("components", "global") for op, _ in calls)
     assert not (base / "output/prepared-seed").exists()
+
+
+@pytest.mark.parametrize('gaps',[0,7])
+def test_selected_quality_reaches_every_native_call_and_global_recovery(tmp_path,monkeypatch,gaps):
+    driver,base,source,calls=setup_driver(tmp_path,monkeypatch,native_gaps=gaps)
+    monkeypatch.setattr(sys,'argv',[*sys.argv,'--routing-quality','turns'])
+    driver.main()
+    native=[request for op,request in calls if op!='global']
+    assert native and all(request['routing_quality']=='turns' for request in native)
+    for op,command in calls:
+        if op=='global':assert command[-2:]==['--routing-quality','turns']
+    assert json.loads((base/'output/result.json').read_text())['routing_quality']=='turns'
+
+
+def test_invalid_quality_is_rejected_before_starting_native_work(tmp_path,monkeypatch):
+    driver,base,source,calls=setup_driver(tmp_path,monkeypatch)
+    monkeypatch.setattr(sys,'argv',[*sys.argv,'--routing-quality','bogus'])
+    with pytest.raises(ValueError,match='routing quality'):driver.main()
+    assert calls==[] and not (base/'output').exists()

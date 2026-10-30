@@ -3,6 +3,8 @@ import json,sys,shutil,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT))
 from smilepcb.keyboard_tools import load_tools,configure_kicad
+from smilepcb.routing_quality import quality_from_args
+quality=quality_from_args(sys.argv[5:])
 tools=load_tools(sys.argv[1]);base=ROOT/'.lab/public-controller'
 source=base/sys.argv[2]/'project';out=base/sys.argv[3];out.mkdir(exist_ok=False)
 configure_kicad(tools,out)
@@ -39,7 +41,7 @@ def announce(value):
 def call(operation,tag=None,**kw):
     if operation in ('components','negotiate'):kw['attempt_counts']=dict(counts)
     tag=tag or operation;path=kw.pop('board_override',board);tick=time.perf_counter()
-    data=worker(BRIDGE,dict(operation=operation,board=str(path),**kw),out/(tag+'.log'),timeout_s=min(90,deadline-time.perf_counter()))
+    data=worker(BRIDGE,dict(operation=operation,board=str(path),routing_quality=quality,**kw),out/(tag+'.log'),timeout_s=min(90,deadline-time.perf_counter()))
     counts.update(data.get('graph',{}).get('attempt_counts',{}))
     (out/(tag+'.json')).write_text(json.dumps(data,indent=2)+'\n')
     history.append({'operation':operation,'tag':tag,'elapsed_s':time.perf_counter()-tick,'pad_group_gaps':data.get('pad_group_gaps'),'connections':data.get('connections')})
@@ -84,7 +86,7 @@ try:
         transaction=routing_transaction(project,out/'ports-candidate',escape,independent,deadline=deadline)
         (out/'ports-transaction.json').write_text(json.dumps(transaction,indent=2)+'\n')
         if transaction['accepted']:independent=call('verify',tag='ports-saved')
-    independent=recover_generated(project,out,independent,protected,call,announce,deadline,port_ids=port_ids)
+    independent=recover_generated(project,out,independent,protected,call,announce,deadline,port_ids=port_ids,routing_quality=quality)
     if independent['pad_group_gaps']:raise ValueError('Remaining independent native pad groups: '+str(independent['pad_groups_missing']))
     announce('Final native cleanup and full ERC/DRC')
     call('cleanup',protected_ids=protected)
@@ -101,7 +103,7 @@ try:
         checks=rule_checks(project,out/('reported-tail-checks-'+str(index)),'keyboard',timeout_s=240,deadline=deadline)
     require_clean_rules(checks)
     if independent['pad_group_gaps']:raise ValueError('Cleanup left pad-group gaps')
-    result={'complete':True,'fixture':sys.argv[4],'independent':independent,'native_checks':checks,'firmware':firmware,'history':history,'elapsed_s':time.perf_counter()-started,'output_hashes':file_hashes(project),'hardware_tested':False}
+    result={'complete':True,'fixture':sys.argv[4],'routing_quality':quality,'independent':independent,'native_checks':checks,'firmware':firmware,'history':history,'elapsed_s':time.perf_counter()-started,'output_hashes':file_hashes(project),'hardware_tested':False}
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');announce('Complete software acceptance')
 except BaseException as error:
     (out/'failure.json').write_text(json.dumps({'complete':False,'stage':stage,'error':str(error),'firmware':firmware,'history':history,'elapsed_s':time.perf_counter()-started},indent=2)+'\n')

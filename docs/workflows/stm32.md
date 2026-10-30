@@ -1,8 +1,11 @@
 # Fresh STM32 KLE → PCB → QMK replay
 
-Version 0.1.0 qualifies `ansi61` and `compact68` using this source-checkout
-workflow. Run commands from the checkout root. Existing routed keyboards
-are never cold inputs.
+This experimental source-checkout workflow uses `ansi61` and `compact68`.
+The current candidate has one accepted fresh build of each, but its repeated
+68-key trial failed with five connections remaining. Repeated qualification
+has not passed; see the [measured results](../qualification/0.2.0rc1.json).
+Run commands from the checkout root. Existing routed keyboards are never cold
+inputs.
 
 ## External tools
 
@@ -34,10 +37,20 @@ cp examples/tools.example.json .lab/tools.json
 ```
 
 QMK builds use isolated outputs with two jobs; the original source tree is not
-edited. Qualification used a retained runtime, not a newly verified upstream
-checkout. Receipts fingerprint its actual source tree and deliberately set
-`runtime_commit_verified: false`. A different QMK version requires a new
-compatibility check.
+edited. The candidate toolchain uses QMK commit
+`98e65cf3e1fb4bf61367d469a62d3cce0a9fac20` with its pinned submodules and
+QMK CLI 1.1.8. Use that revision when provisioning the source tree:
+
+```sh
+git clone https://github.com/qmk/qmk_firmware.git /path/to/qmk_firmware
+git -C /path/to/qmk_firmware checkout --detach 98e65cf3e1fb4bf61367d469a62d3cce0a9fac20
+git -C /path/to/qmk_firmware submodule update --init --recursive
+```
+
+Build receipts fingerprint the isolated runtime's actual source files. They
+set `runtime_commit_verified: false` because that copy has no Git metadata;
+this flag does not verify the upstream revision. A different QMK version
+requires a new compatibility check.
 
 ## Public controller source
 
@@ -70,7 +83,8 @@ the donor's CERN-OHL-W-2.0 COPYING, README and provenance into generated project
   .lab/tools.json first-ansi61 \
   --fixture ansi61 --native-staged \
   --process-profile fr4-2l-1oz-0p5-0p2 \
-  --optimize-matrix-gpio --completion-budget-s 3600
+  --optimize-matrix-gpio --completion-budget-s 3600 \
+  --routing-quality turns
 ```
 
 Use `--fixture compact68` with a different tag for the second layout.
@@ -92,6 +106,39 @@ The 3600-second option bounds completion, not the whole command. Other stages
 also have deadlines. Global routing uses at most two CPUs and a 512 MiB Java
 heap; process RSS can exceed the heap. Run one heavy workflow at a time.
 Success on another runtime/layout is not guaranteed.
+
+## Routing quality
+
+`--routing-quality legacy` is the default. `--routing-quality turns` is an
+opt-in candidate policy for `--native-staged`. It ranks simple legal paths by
+physical length plus a 1 mm equivalent cost per direction change. Grid search
+keeps different ingress headings as separate labels; exact terminal access
+leads count, and a via resets heading on the new face. Costs are positive.
+The search is bounded and heuristic, not an optimality guarantee.
+
+Both quality modes share placement, USB preparation, native constraints and
+Freerouting's cost model. Native component routing and local recovery capture the
+selected policy. A fallback result records `routing_quality` separately from
+`global_engine`; it does not imply that Freerouting implements the bend policy.
+Whole-copper diagnostics report length, endpoint bends, branches, vias and arcs,
+including power and ground. Branch counts use serialized segment endpoints and
+can change when the same copper is split into more segments; they are not a
+normalized topology metric. These diagnostics never replace native admission
+checks.
+
+The new local collision checks include copper board/footprint graphics, text
+and fields, and use both nets' effective clearances. Registration targets are
+not milled edges. Native custom-rule evaluation remains part of final DRC.
+Run optional native regression checks with the configured KiCad interpreter:
+
+```sh
+SMILEPCB_KICAD_PYTHON=/path/to/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
+  .venv/bin/python -m pytest -q tests/test_native_physical_obstacles.py
+```
+
+The candidate did not pass repeated full-board qualification. A successful
+individual build does not establish repeatable completion or identical geometry.
+The earlier 0.1.0 results do not qualify this new mode.
 
 ## Rule scope
 
@@ -117,3 +164,12 @@ A successful placement diagnostic is not a complete keyboard. Check
 `complete: true`, `fresh_from_kle: true`, zero native findings/gaps and
 matching clean firmware evidence. Failed commands leave diagnostic artifacts.
 The generated boards still require electrical, mechanical and assembly review.
+
+
+The completion stage retains its original short provisional search. After the
+ordinary geometric attempts, a final search may explore up to eight temporary
+states inside allocated copies, with at most initial+2 pending groups (capped
+at eight). It chooses signal or return recovery from the current native state.
+The original completion deadline and final-check reserve still apply. No
+intermediate state is promoted: the original frame, all pad partitions, native
+rules and matching firmware must pass the normal final acceptance.

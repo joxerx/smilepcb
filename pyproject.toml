@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smilepcb"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Experimental keyboard PCB automation with KiCad and QMK"
 readme = "README.md"
 license = "MIT AND CERN-OHL-P-2.0"

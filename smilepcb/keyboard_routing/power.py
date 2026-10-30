@@ -71,6 +71,16 @@ def seed_plane_access(board,pads,*,deadline=None,track_width_nm=None,max_distanc
     if type(via_to_smd_clearance_nm) is not int or not 0<=via_to_smd_clearance_nm<=2000000:
         raise ValueError('Via-to-SMD clearance must be between 0 and 2 mm')
     if deadline is not None and time.monotonic()>=deadline:return []
+    # Access must already be connected by explicit copper. A filled plane can
+    # become stale as later routes are added and is not a local escape path.
+    from .native_graph import copper_graph
+    pads=list(pads)
+    graph=copper_graph(board,{pad.GetNetname() for pad in pads},deadline,include_zones=False)
+    roots={node['item'].m_Uuid.AsString():graph['find'](i) for i,node in enumerate(graph['nodes'])}
+    access={}
+    for root,indices in graph['groups'].items():
+        access[root]=[graph['nodes'][i]['item'] for i in indices
+                      if isinstance(graph['nodes'][i]['item'],p.PCB_VIA)]
     router=LocalRouter(board,deadline=deadline,compact=True,track_width_nm=track_width_nm);report=[]
     radii=sorted(set(range(800000,max_distance_nm+1,200000))|{max_distance_nm})
     lands={}
@@ -98,6 +108,18 @@ def seed_plane_access(board,pads,*,deadline=None,track_width_nm=None,max_distanc
         layer=layers[0];start=xy(pad.GetPosition());net=pad.GetNetname()
         row={'ref':pad.GetParentFootprint().GetReference(),'pin':pad.GetNumber(),
              'net':net,'connected':False,'ids':[]}
+        root=roots[pad.m_Uuid.AsString()]
+        for existing in sorted(access.get(root,()),key=lambda via:(
+                math.dist(start,xy(via.GetPosition())),via.m_Uuid.AsString())):
+            end=xy(existing.GetPosition())
+            if math.dist(start,end)>max_distance_nm:continue
+            if not lands_clear(p.SHAPE_CIRCLE(vec(end),existing.GetDrillValue()//2),p.FromMM(.1)):continue
+            if via_to_smd_clearance_nm and not lands_clear(
+                    p.SHAPE_CIRCLE(vec(end),existing.GetWidth(layer)//2),via_to_smd_clearance_nm):continue
+            row.update(connected=True,via_id=existing.m_Uuid.AsString(),reused=True)
+            break
+        if row['connected']:
+            report.append(row);continue
         for radius in radii:
             if router.expired():break
             for degrees in range(0,360,45):
@@ -119,7 +141,12 @@ def seed_plane_access(board,pads,*,deadline=None,track_width_nm=None,max_distanc
                 if not router.clear(shape,layer,net):continue
                 if router.expired():break
                 mark=len(router.added);router.add_path([start,end],layer,net);router.add_via(end,net)
-                row.update(connected=True,ids=router.added[mark:],via_id=router.added[-1]);break
+                row.update(connected=True,ids=router.added[mark:],via_id=router.added[-1],reused=False)
+                # The new via belongs to this original pad group; subsequent
+                # pads in the same batch should not overlay a second escape.
+                access.setdefault(root,[]).append(next(item for item in board.GetTracks()
+                    if item.m_Uuid.AsString()==row['via_id']))
+                break
             if row['connected']:break
         report.append(row)
     return report

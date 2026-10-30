@@ -63,3 +63,56 @@ def balance_pair(board, nets, *, editable_ids):
         return dict(report,changed=True,net=short,added_ids=added,removed_ids=[uid],
                     lengths_mm={net:value/1e6 for net,value in lengths.items()})
     raise ValueError('No clearance/contact-safe skew tuning within the bounded search')
+
+
+def try_joint_pair(board,nets,*,source_ref,target_ref,layer,deadline,track_width_nm=200000):
+    """Try both joins together under the captured native generation margins.
+
+    No geometry changes on failure. Existing source copper remains immutable;
+    only a complete, mutually clear pair within the recipe length/skew limits
+    is added. A previously connected pair is an idempotent no-op.
+    """
+    import time
+    from .keyboard_routing.pair_paths import paired_octile_paths
+    from .keyboard_routing.local_router import LocalRouter
+    from .keyboard_routing.native_graph import copper_graph
+    from .keyboard_routing.completion import component_frontiers
+    if len(nets)!=2 or len(set(nets))!=2:raise ValueError('Select two distinct pair nets')
+    fps={f.GetReference():f for f in board.GetFootprints()}
+    starts=[];ends=[];closed=[]
+    for net in nets:
+        if time.monotonic()>=deadline:return None
+        graph=copper_graph(board,{net},deadline)
+        indices={node['item'].m_Uuid.AsString():i for i,node in enumerate(graph['nodes'])}
+        component=next(rows for rows in graph['groups'].values() if any(
+            isinstance(graph['nodes'][i]['item'],p.PAD) and
+            graph['nodes'][i]['item'].GetParentFootprint().GetReference()==source_ref for i in rows))
+        target=next(d for d in fps[target_ref].Pads() if d.GetNetname()==net)
+        if not target.IsOnLayer(layer):return None
+        closed.append(graph['find'](indices[target.m_Uuid.AsString()])==graph['find'](component[0]))
+        starts.append(component_frontiers(graph,component,deadline));ends.append(xy(target.GetPosition()))
+    if all(closed):return {net:{'added_ids':[],'method':'already connected'} for net in nets}
+    if any(closed):return None
+    candidates=[]
+    lengths={net:sum(t.GetLength() for t in board.GetTracks() if t.GetNetname()==net) for net in nets}
+    for a in starts[0]:
+        for z in starts[1]:
+            if time.monotonic()>=deadline:return None
+            for paths in paired_octile_paths((a,z),ends):
+                added=[sum(math.dist(a,b) for a,b in zip(path,path[1:])) for path in paths]
+                totals=[lengths[net]+extra for net,extra in zip(nets,added)]
+                if all(0<value<20000000 for value in totals) and abs(totals[0]-totals[1])<500000:
+                    candidates.append((sum(added),sum(len(path) for path in paths),paths))
+    router=LocalRouter(board,deadline=deadline,compact=True,track_width_nm=track_width_nm)
+    gap=max(router.net_clearances.get(net,0) for net in nets)
+    for _,_,paths in sorted(candidates):
+        if router.expired():return None
+        shapes=[[p.SHAPE_SEGMENT(vec(a),vec(b),track_width_nm) for a,b in zip(path,path[1:])] for path in paths]
+        if not all(router.clear(shape,layer,net) for net,row in zip(nets,shapes) for shape in row):continue
+        if any(p.SHAPE.Collide(a,b,gap) for a in shapes[0] for b in shapes[1]):continue
+        report={}
+        for net,path in zip(nets,paths):
+            mark=len(router.added);router.add_path(path,layer,net)
+            report[net]={'added_ids':router.added[mark:],'points_nm':path,'method':'joint checked octile'}
+        return report
+    return None
