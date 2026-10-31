@@ -19,6 +19,8 @@ See the [workflow limitations](docs/workflows/stm32.md#routing-quality).
 - Make native component ordering depend on conductor geometry rather than
   random identities or iteration order.
 - Preserve failed-attempt history across ordinary and provisional recovery.
+- Allow the final owned elastic search to explore lower-displacement-cost
+  candidates without relaxing physical rules or admitting partial results.
 - In turns mode, balance displacement cost and heuristic guidance to avoid
   cutting completed connections when a cheaper bypass is available.
 

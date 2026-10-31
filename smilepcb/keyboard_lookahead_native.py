@@ -78,7 +78,7 @@ def _run(request):
     old=pad_gaps(board)
     cfg=json.loads((path.parent/'.smilepcb-keyboard.json').read_text())
     strategy='plane_negotiate' if elastic and set(old)&set(cfg['plane_nets']) else 'signal_negotiate'
-    native=repair_candidate(board,strategy,protected=protected,plane_nets=set(cfg['plane_nets']),request={'attempt_counts':request.get('attempt_counts',{})},deadline=deadline)
+    native=repair_candidate(board,strategy,protected=protected,plane_nets=set(cfg['plane_nets']),request={'attempt_counts':request.get('attempt_counts',{})},deadline=deadline,exploratory=elastic)
     missing=pad_gaps(board)
     require_provisional_frame(before,snapshot(board),protected)
     decision=provisional_step(old,missing,seen={tuple(tuple(pair) for pair in signature) for signature in request.get('seen',())},depth=request['depth'],max_depth=max_depth,gap_ceiling=ceiling)
@@ -87,7 +87,7 @@ def _run(request):
         if time.monotonic()>=deadline:raise TimeoutError('Provisional save deadline exhausted')
         if not p.SaveBoard(str(path),board):raise ValueError('Cannot save disposable provisional board')
     return {'provisional_only':True,'accepted_final':False,'saved_trial':decision['allowed'],
-            'before':old,'after':missing,'protect_healed':sorted(decision['protect_healed']),'native_repair':native,'strategy':strategy}
+            'before':old,'after':missing,'protect_healed':sorted(decision['protect_healed']),'native_repair':native,'strategy':strategy,'exploratory':elastic}
 
 
 if __name__=='__main__':print(json.dumps(run(json.load(sys.stdin))))

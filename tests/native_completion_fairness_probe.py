@@ -21,11 +21,20 @@ for i,net in enumerate(('A','B','C')):
 with using_quality_profile('turns'):
  r=repair_candidate(b,'signal_negotiate',protected=set(),plane_nets=set(),request={'attempt_counts':{'C':2}},deadline=time.monotonic()+82)
 plan=r['signal_negotiation'];fair={'order':[a['net'] for a in plan['diagnostic']['attempts']],'counts':r['graph'].get('attempt_counts'),'after':r['after']}
-def weight_for(mode):
+def weight_for(mode,*,exploratory=False):
  b=board();pad(b,'T1','TARGET',3,15);pad(b,'T2','TARGET',25,15);pad(b,'K1','KEEP',14,11);pad(b,'K2','KEEP',14,19)
  t=p.PCB_TRACK(b);t.SetStart(point(14,11));t.SetEnd(point(14,19));t.SetWidth(150000);t.SetLayer(p.F_Cu);t.SetNet(b.FindNet('KEEP'));b.Add(t)
  with using_quality_profile(mode):
-  r=repair_candidate(b,'signal_negotiate',protected=set(),plane_nets=set(),request={},deadline=time.monotonic()+82)
+  r=repair_candidate(b,'signal_negotiate',protected=set(),plane_nets=set(),request={},deadline=time.monotonic()+82,**({'exploratory':True} if exploratory else {}))
  plan=r['signal_negotiation'];return {'removed':len(plan['removed']),'after':r['after'],'connected':plan['connected']}
 weight=weight_for('turns');weight_legacy=weight_for('legacy')
-report={'fair':fair,'weight':weight,'weight_legacy':weight_legacy};(out/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
+try:
+ weight_exploratory=weight_for('turns',exploratory=True);weight_exploratory['supported']=True
+except TypeError as error:
+ weight_exploratory={'supported':False,'error':str(error)}
+try:
+ repair_candidate(board(),'signal_negotiate',protected=set(),plane_nets=set(),request={},deadline=time.monotonic()+82,exploratory=1)
+ invalid_mode_rejected=False
+except ValueError:invalid_mode_rejected=True
+except TypeError:invalid_mode_rejected=False
+report={'fair':fair,'weight':weight,'weight_legacy':weight_legacy,'weight_exploratory':weight_exploratory,'invalid_mode_rejected':invalid_mode_rejected};(out/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))

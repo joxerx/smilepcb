@@ -117,6 +117,11 @@ keeps different ingress headings as separate labels; exact terminal access
 leads count, and a via resets heading on the new face. Costs are positive.
 The search is bounded and heuristic, not an optimality guarantee.
 
+The final owned elastic search lowers the signal-displacement preference after
+ordinary recovery stalls. It retains the same hop limit, shared deadline, native
+constraints and zero-only promotion gate. Ordinary and conservative turns
+searches keep their stronger displacement preference; legacy costs are unchanged.
+
 Both quality modes share placement, USB preparation, native constraints and
 Freerouting's cost model. Native component routing and local recovery capture the
 selected policy. A fallback result records `routing_quality` separately from

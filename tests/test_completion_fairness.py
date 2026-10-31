@@ -43,3 +43,15 @@ def test_legacy_retains_its_previous_negotiation_preference(native_report):
     assert native_report['weight_legacy']['after']=={}
     assert native_report['weight_legacy']['connected']==1
     assert native_report['weight_legacy']['removed']==1
+
+
+def test_disposable_exploration_can_reconnect_displaced_copper(native_report):
+    result=native_report['weight_exploratory']
+    assert result.get('supported'),result
+    assert result['connected']==1 and result['after']=={}
+    assert result['removed']==1
+    assert native_report['weight']['removed']==0
+
+
+def test_exploratory_mode_rejects_non_boolean_inputs(native_report):
+    assert native_report['invalid_mode_rejected']

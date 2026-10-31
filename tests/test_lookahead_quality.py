@@ -222,3 +222,21 @@ def test_recovery_uses_one_attempt_ledger_for_both_provisional_searches(tmp_path
     result=recover_generated(tmp_path,tmp_path,previous,[],call,lambda *_:None,time.perf_counter()+2000,attempt_counts=counts)
     assert seen==[{'A':1},{'A':1,'B':1}]
     assert counts=={'A':1,'B':2} and result['pad_group_gaps']==0
+
+
+def test_only_elastic_owned_search_enables_exploratory_repair(tmp_path):
+    env,_=native_entrypoint(tmp_path);modes=[]
+    def repair(_board,_strategy,**kwargs):
+        modes.append(kwargs.get('exploratory',False));return {}
+    env['repair_candidate']=repair
+    env['run'](dict(operation='provisional',budget_s=1,depth=0,elastic=True,gap_ceiling=3))
+    assert modes==[True]
+
+
+def test_conservative_request_cannot_enable_exploratory_repair(tmp_path):
+    env,_=native_entrypoint(tmp_path);modes=[]
+    def repair(_board,_strategy,**kwargs):
+        modes.append(kwargs.get('exploratory',False));return {}
+    env['repair_candidate']=repair
+    env['run'](dict(operation='provisional',budget_s=1,depth=0,elastic=False,exploratory=True))
+    assert modes==[False]

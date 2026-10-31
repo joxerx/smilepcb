@@ -95,7 +95,8 @@ def completion_router(board,deadline):
     return router
 
 
-def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
+def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline,exploratory=False):
+    if type(exploratory) is not bool:raise ValueError('Exploratory repair mode must be boolean')
     from smilepcb.keyboard_native import pad_gaps
     from smilepcb.routing_style import apply_style
     from .recovery_steps import short_spokes,shift_blocking_vias
@@ -142,7 +143,7 @@ def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
                 router.connection_budget_s=18;router.search_budget_s=18;router.allow_penalty_fallback=False
                 router.displacement_cost_nm=p.FromMM(1)
                 if router.quality.name=='turns':
-                    router.displacement_cost_nm=p.FromMM(5)
+                    router.displacement_cost_nm=p.FromMM(1 if exploratory else 5)
                     router.heuristic_weight=2
                 router.via_cost_nm=1000000;router.layer_change_heuristic_nm=0
             return router
