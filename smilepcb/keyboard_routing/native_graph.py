@@ -90,6 +90,16 @@ def copper_graph(board,nets,deadline=None,*,include_zones=True):
             for i in range(filled.OutlineCount()):
                 budget();shape=filled.UnitSet(i);points=island_points(shape)
                 nodes.append(dict(item=zone,shapes={layer:shape},points=points,net=zone.GetNetname(),zone=True))
+    # Native iteration/UUID order is metadata, not a routing preference.
+    # Keep component IDs and equal-distance choices tied to physical geometry.
+    def stable_key(node):
+        boxes=[]
+        for layer,shape in sorted(node['shapes'].items()):
+            box=shape.BBox();boxes.append((layer,box.GetLeft(),box.GetTop(),box.GetRight(),box.GetBottom()))
+        item=node['item']
+        pad=(item.GetParentFootprint().GetReference(),item.GetNumber()) if isinstance(item,p.PAD) else ()
+        return (node['net'],node['zone'],tuple(boxes),item.GetClass(),tuple(sorted(node['points'])),pad)
+    nodes.sort(key=stable_key)
     parents=list(range(len(nodes)))
     def find(i):
         while parents[i]!=i:parents[i]=parents[parents[i]];i=parents[i]
@@ -340,7 +350,7 @@ def negotiate_routes(board,nets,protected,deadline,*,router_factory=None,attempt
     world=factory(board,deadline=deadline,compact=True)
     relaxed=factory(board,deadline=deadline-reserve,compact=True,ignored_copper=soft)
     relaxed.attempt_counts=attempt_counts if attempt_counts is not None else {}
-    relaxed.grid_step=125000;relaxed.heuristic_weight=3
+    relaxed.grid_step=125000;relaxed.heuristic_weight=getattr(relaxed,'heuristic_weight',3)
     # Disturbing existing generated copper is possible, but a clear detour
     # should be cheaper than casually cutting another completed signal.
     # This is a search preference only; hard obstacles and final validation

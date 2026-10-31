@@ -1,7 +1,8 @@
 # Fresh STM32 KLE → PCB → QMK replay
 
 This experimental source-checkout workflow uses `ansi61` and `compact68`.
-The current candidate has one accepted fresh build of each, but its repeated
+Follow-up routing fixes in this checkout are awaiting fresh qualification.
+The earlier candidate had one accepted fresh build of each, but its repeated
 68-key trial failed with five connections remaining. Repeated qualification
 has not passed; see the [measured results](../qualification/0.2.0rc1.json).
 Run commands from the checkout root. Existing routed keyboards are never cold
@@ -140,7 +141,7 @@ The candidate did not pass repeated full-board qualification. A successful
 individual build does not establish repeatable completion or identical geometry.
 The earlier 0.1.0 results do not qualify this new mode.
 
-The staged coordinator does not yet compare both retained routing checkpoints. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups; a failed global job stops the workflow while the native attempt remains available only as diagnostic evidence. This is a known recovery limitation, not evidence that selecting the checkpoint with fewer gaps would complete the board.
+The staged coordinator does not yet rank both retained routing checkpoints by future completion difficulty. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups. If a global job fails, an available physically checked native checkpoint is retained for completion; otherwise the workflow fails. Selecting the checkpoint with fewer gaps alone has not been shown to complete the board.
 
 ## Rule scope
 

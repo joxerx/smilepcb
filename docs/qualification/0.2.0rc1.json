@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "version": "0.2.0rc1",
-  "status": "Experimental candidate; repeated full-board qualification did not pass",
+  "status": "Historical candidate cohort; follow-up routing fixes are awaiting fresh qualification",
   "routing_quality": "turns",
   "planned_trials": 4,
   "completed_trials": 3,
@@ -191,5 +191,6 @@
     "No comparative speed, memory or appearance improvement claim against an unmatched baseline.",
     "Only accepted outputs may be described as passing native checks."
   ],
-  "known_coordinator_limitation": "The staged coordinator does not yet compare both retained routing checkpoints. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups; a failed global job stops the workflow while the native attempt remains available only as diagnostic evidence. This is a known recovery limitation, not evidence that selecting the checkpoint with fewer gaps would complete the board."
+  "known_coordinator_limitation": "The staged coordinator does not yet rank both retained routing checkpoints by future completion difficulty. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups. If a global job fails, an available physically checked native checkpoint is retained for completion; otherwise the workflow fails. Selecting the checkpoint with fewer gaps alone has not been shown to complete the board.",
+  "cohort_is_current_source": false
 }

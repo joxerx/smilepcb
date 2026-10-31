@@ -20,7 +20,7 @@ def provisional_step(before,after,*,seen,depth,max_depth=3,gap_ceiling=None):
     return {'allowed':allowed,'complete':allowed and not after,'protect_healed':set(before)-set(after) if allowed else set()}
 
 
-def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None,routing_quality='legacy',elastic=False):
+def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None,routing_quality='legacy',elastic=False,attempt_counts=None):
     """Promote only checked zero; optionally explore bounded temporary gaps.
 
     Conservative mode retains three non-worsening hops. Elastic mode permits
@@ -62,16 +62,18 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
         data=worker(bridge,dict(operation=operation,**{key:str(value) if isinstance(value,Path) else value for key,value in request.items()},budget_s=min(82,budget-1)),root/(tag+'.log'),timeout_s=budget)
         (root/(tag+'.json')).write_text(encode(data));return data
     current=project;seen={gap_signature(missing)};healed=set();history=[];final=None
+    attempt_counts={} if attempt_counts is None else attempt_counts
     announce('bounded disposable routing lookahead')
     for depth in range(max_depth):
         if trial_deadline-time.perf_counter()<90:break
         candidate=root/('hop-'+str(depth))/'project';shutil.copytree(current,candidate)
         data=invoke('provisional',tag='hop-'+str(depth),board=candidate/(NAME+'.kicad_pcb'),
                     trial_root=root,owner_token=token,depth=depth,seen=[list(row) for row in sorted(seen)],
-                    protected_ids=sorted(set(protected)),protect_nets=sorted(healed))
+                    protected_ids=sorted(set(protected)),protect_nets=sorted(healed),attempt_counts=dict(attempt_counts))
         if data.get('provisional_only') is not True or data.get('accepted_final') is not False:
             raise ValueError('Provisional worker returned a final-acceptance claim')
         if data.get('before')!=missing:raise ValueError('Stale provisional connectivity inventory')
+        attempt_counts.update(data.get('native_repair',{}).get('graph',{}).get('attempt_counts',{}))
         decision=provisional_step(missing,data['after'],seen=seen,depth=depth,max_depth=max_depth,gap_ceiling=ceiling)
         history.append({**data,'decision':{**decision,'protect_healed':sorted(decision['protect_healed'])}})
         (root/'history.json').write_text(encode({'provisional_only':True,'accepted_final':False,'hops':history}))

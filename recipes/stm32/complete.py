@@ -39,7 +39,7 @@ def announce(value):
     stage=value;print(value,flush=True)
     (out/'progress.json').write_text(json.dumps({'stage':value,'elapsed_s':time.perf_counter()-started},indent=2)+'\n')
 def call(operation,tag=None,**kw):
-    if operation in ('components','negotiate'):kw['attempt_counts']=dict(counts)
+    if operation in ('components','negotiate','complete'):kw['attempt_counts']=dict(counts)
     tag=tag or operation;path=kw.pop('board_override',board);tick=time.perf_counter()
     data=worker(BRIDGE,dict(operation=operation,board=str(path),routing_quality=quality,**kw),out/(tag+'.log'),timeout_s=min(90,deadline-time.perf_counter()))
     counts.update(data.get('graph',{}).get('attempt_counts',{}))
@@ -86,7 +86,7 @@ try:
         transaction=routing_transaction(project,out/'ports-candidate',escape,independent,deadline=deadline)
         (out/'ports-transaction.json').write_text(json.dumps(transaction,indent=2)+'\n')
         if transaction['accepted']:independent=call('verify',tag='ports-saved')
-    independent=recover_generated(project,out,independent,protected,call,announce,deadline,port_ids=port_ids,routing_quality=quality)
+    independent=recover_generated(project,out,independent,protected,call,announce,deadline,port_ids=port_ids,routing_quality=quality,attempt_counts=counts)
     if independent['pad_group_gaps']:raise ValueError('Remaining independent native pad groups: '+str(independent['pad_groups_missing']))
     announce('Final native cleanup and full ERC/DRC')
     call('cleanup',protected_ids=protected)

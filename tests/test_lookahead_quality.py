@@ -145,3 +145,80 @@ def test_old_allocation_marker_stays_conservative(tmp_path):
     data=json.loads(marker.read_text());data.pop('elastic');data.pop('gap_ceiling');marker.write_text(json.dumps(data))
     legacy={k:v for k,v in request.items() if k not in ('elastic','gap_ceiling')}
     assert owned(legacy)==(board,source)
+
+
+def test_native_provisional_repair_receives_recorded_attempt_history(tmp_path):
+    env,_=native_entrypoint(tmp_path);received=[]
+    def repair(_board,_strategy,**kwargs):
+        received.append(kwargs['request'].get('attempt_counts'))
+        return {}
+    env['repair_candidate']=repair
+    env['run'](dict(operation='provisional',budget_s=1,depth=0,attempt_counts={'crowded':4}))
+    assert received==[{'crowded':4}]
+
+
+def test_provisional_hops_give_untried_nets_a_turn(tmp_path,monkeypatch):
+    project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
+    (project/'keyboard.kicad_pcb').write_text('original')
+    (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
+    attempted=[];missing={'start':1}
+    def worker(_bridge,request,*_args,**_kwargs):
+        nonlocal missing
+        counts=dict(request.get('attempt_counts',{}))
+        selected=min(('A','B','C'),key=lambda net:(counts.get(net,0),net))
+        counts[selected]=counts.get(selected,0)+1;attempted.append(selected)
+        before=missing;missing={selected:1}
+        return dict(provisional_only=True,accepted_final=False,saved_trial=True,before=before,after=missing,native_repair={'graph':{'attempt_counts':counts}})
+    monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('ordinary.py'),routing_transaction=None))
+    monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=worker,rule_checks=None))
+    previous={'pad_groups_missing':{'start':1},'pad_group_gaps':1}
+    result=run_lookahead(project,out,previous,[],time.perf_counter()+600,lambda *_:None)
+    assert attempted==['A','B','C']
+    assert result is previous and (project/'keyboard.kicad_pcb').read_text()=='original'
+
+
+def test_rejected_provisional_attempt_shares_history_with_ordinary_completion(tmp_path,monkeypatch):
+    project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
+    board=project/'keyboard.kicad_pcb';board.write_text('original')
+    (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
+    counts={};selected=[]
+    def choose(request):
+        ledger=dict(request.get('attempt_counts',{}));net=min(('A','B','C'),key=lambda n:(ledger.get(n,0),n));ledger[net]=ledger.get(net,0)+1;selected.append(net);return ledger
+    def ordinary_worker(_bridge,request,*_a,**_k):return {'accepted':False,'graph':{'attempt_counts':choose(request)}}
+    source=Path(__file__).resolve().parents[1]/'recipes/stm32/complete.py'
+    function=next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.FunctionDef) and n.name=='call')
+    env=dict(counts=counts,worker=ordinary_worker,BRIDGE=Path('bridge.py'),board=board,quality='turns',out=out,time=time,json=json,deadline=time.perf_counter()+600,history=[])
+    exec(compile(ast.Module(body=[function],type_ignores=[]),str(source),'exec'),env)
+    env['call']('complete',tag='first')
+    def provisional_worker(_bridge,request,*_a,**_k):
+        return dict(provisional_only=True,accepted_final=False,saved_trial=False,before={'signal':1},after={'signal':1},native_repair={'graph':{'attempt_counts':choose(request)}})
+    monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('bridge.py'),routing_transaction=None))
+    monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=provisional_worker,rule_checks=None))
+    previous={'pad_groups_missing':{'signal':1},'pad_group_gaps':1}
+    result=run_lookahead(project,out,previous,[],time.perf_counter()+600,lambda *_:None,attempt_counts=counts)
+    env['call']('complete',tag='last')
+    assert selected==['A','B','C']
+    assert counts=={'A':1,'B':1,'C':1}
+    assert result is previous and board.read_text()=='original'
+
+
+def test_recovery_uses_one_attempt_ledger_for_both_provisional_searches(tmp_path,monkeypatch):
+    from smilepcb.keyboard_recovery import recover_generated
+    import smilepcb.keyboard_lookahead as lookahead
+    (tmp_path/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
+    previous={'pad_groups_missing':{'signal':1},'pad_group_gaps':1};counts={'A':1};seen=[]
+    def transaction(project,folder,repair,current,**kw):
+        repair(project);return {'accepted':False,'independent':current}
+    monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',routing_transaction=transaction))
+    def probe(*args,**kwargs):
+        assert kwargs['attempt_counts'] is counts
+        seen.append(dict(counts));counts['B']=counts.get('B',0)+1
+        return {'pad_groups_missing':{},'pad_group_gaps':0} if kwargs.get('elastic') else previous
+    monkeypatch.setattr(lookahead,'run_lookahead',probe)
+    def call(operation,**kw):
+        if operation=='verify':return previous
+        if operation=='completion_candidates':return {'candidates':[]}
+        return {'accepted':False,'failed_vias':[]}
+    result=recover_generated(tmp_path,tmp_path,previous,[],call,lambda *_:None,time.perf_counter()+2000,attempt_counts=counts)
+    assert seen==[{'A':1},{'A':1,'B':1}]
+    assert counts=={'A':1,'B':2} and result['pad_group_gaps']==0

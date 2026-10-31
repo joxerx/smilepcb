@@ -120,11 +120,12 @@ def plane_pairs(independent,planes):
     return result
 
 
-def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=(),routing_quality='legacy'):
+def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=(),routing_quality='legacy',attempt_counts=None):
     """Keep improving checked transactions; retain all rejected diagnostics."""
     from .service import encode
     from .keyboard_build import routing_transaction,NAME
     output=Path(output);index=0;current=independent
+    attempt_counts={} if attempt_counts is None else attempt_counts
     if not current['pad_group_gaps']:return current
     def attempt(strategy,**kwargs):
         nonlocal index,current
@@ -180,7 +181,7 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         if current['pad_group_gaps']>=before:break
     if current['pad_group_gaps']:
         from .keyboard_lookahead import run_lookahead
-        current=run_lookahead(project,output,current,protected,deadline,announce,routing_quality=routing_quality)
+        current=run_lookahead(project,output,current,protected,deadline,announce,routing_quality=routing_quality,attempt_counts=attempt_counts)
     if not current['pad_group_gaps']:return current
     # A batch may sacrifice one old signal after joining several returns.
     # Retry native island pairs separately, retaining only checked progress;
@@ -226,5 +227,5 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         # Later shifts/detours change the state that the first conservative
         # lookahead saw. Explore that new topology within the same deadline.
         current=run_lookahead(project,output,current,protected,deadline,announce,
-                              routing_quality=routing_quality,elastic=True)
+                              routing_quality=routing_quality,elastic=True,attempt_counts=attempt_counts)
     return current

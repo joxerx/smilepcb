@@ -80,6 +80,8 @@ def main():
     phases = ordered_nets(cfg)
     selected = "ordered-native"
     native_error = None
+    native_candidate = None
+    global_error = None
     try:
         for phase, nets in phases:
             if not nets:
@@ -97,6 +99,7 @@ def main():
         if (checks["erc"]["severity"] or checks["drc"]["severity"].get("error")
                 or checks["drc"]["schematic_parity"]):
             raise ValueError("Native ordered attempt has physical or parity violations")
+        native_candidate = (independent, checks)
         if independent["pad_group_gaps"]:
             raise ValueError("Native ordered attempt has remaining pad groups")
     except (ValueError, RuntimeError, TimeoutError, subprocess.SubprocessError) as error:
@@ -111,13 +114,24 @@ def main():
         command = [sys.executable, str(Path(__file__).with_name("route_global.py")),
                    sys.argv[1], tag, sys.argv[2] + "/prepared-seed",'--routing-quality',quality]
         print("checked global recovery from immutable generated seed", flush=True)
-        with (out / "generated-global.log").open("w") as log:
-            subprocess.run(command, cwd=ROOT, env=environment(), stdout=log,
-                           stderr=subprocess.STDOUT, timeout=1000, check=True)
-        global_out = base / tag
-        shutil.copytree(global_out / "project", project)
-        independent = json.loads((global_out / "independent.json").read_text())
-        checks = json.loads((global_out / "native-checks/summary.json").read_text())
+        try:
+            with (out / "generated-global.log").open("w") as log:
+                subprocess.run(command, cwd=ROOT, env=environment(), stdout=log,
+                               stderr=subprocess.STDOUT, timeout=1000, check=True)
+        except subprocess.SubprocessError as error:
+            # Only a physically checked native attempt is a usable fallback.
+            # Its open groups remain explicit; completion/firmware still gate it.
+            if native_candidate is None:
+                raise
+            global_error = str(error)
+            selected = "ordered-native-after-global-failure"
+            shutil.copytree(archive / "project", project)
+            independent, checks = native_candidate
+        else:
+            global_out = base / tag
+            shutil.copytree(global_out / "project", project)
+            independent = json.loads((global_out / "independent.json").read_text())
+            checks = json.loads((global_out / "native-checks/summary.json").read_text())
     # The cold entrypoint checks this standard location before native completion.
     (out / "native-checks").mkdir()
     (out / "native-checks/summary.json").write_text(json.dumps(checks, indent=2) + "\n")
@@ -125,6 +139,7 @@ def main():
         raise ValueError("Routing edited its placed source project")
     result = {"complete": False, "routing_scope": "completion/firmware gates pending",
               "selected_path": selected, "native_attempt_error": native_error,
+              "global_attempt_error": global_error,
               "generation_profile": PROFILE,'routing_quality':quality, "elapsed_s": time.perf_counter() - started,
               "history": history, "phases": phases, "rgb_order": cfg["layout"]["rgb_order"],
               "independent": independent, "native_checks": checks,

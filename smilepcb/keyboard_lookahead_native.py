@@ -78,7 +78,7 @@ def _run(request):
     old=pad_gaps(board)
     cfg=json.loads((path.parent/'.smilepcb-keyboard.json').read_text())
     strategy='plane_negotiate' if elastic and set(old)&set(cfg['plane_nets']) else 'signal_negotiate'
-    native=repair_candidate(board,strategy,protected=protected,plane_nets=set(cfg['plane_nets']),request={},deadline=deadline)
+    native=repair_candidate(board,strategy,protected=protected,plane_nets=set(cfg['plane_nets']),request={'attempt_counts':request.get('attempt_counts',{})},deadline=deadline)
     missing=pad_gaps(board)
     require_provisional_frame(before,snapshot(board),protected)
     decision=provisional_step(old,missing,seen={tuple(tuple(pair) for pair in signature) for signature in request.get('seen',())},depth=request['depth'],max_depth=max_depth,gap_ceiling=ceiling)

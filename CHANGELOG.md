@@ -4,16 +4,23 @@ Changes are recorded here and on the GitHub Releases page.
 
 ## 0.2.0rc1 — candidate (2026-10-31)
 
-Experimental candidate. Repeated full-board qualification did not pass: fresh
+Experimental candidate. Follow-up fixes are awaiting fresh qualification.
+The earlier measured cohort did not pass repeated full-board qualification: fresh
 61-key and 68-key builds reached ERC/DRC/connectivity zero with clean matching
 QMK, but a second 68-key build stopped with five connections remaining. The
 fourth planned trial was not run. This candidate does not establish repeatable
 completion. See [measurements](docs/qualification/0.2.0rc1.json).
 
-The staged coordinator also retains a known fallback limitation: global routing
-can replace a better-connected native checkpoint, and a global job failure
-stops the workflow rather than resuming that checkpoint. See the
-[workflow limitations](docs/workflows/stm32.md#routing-quality).
+The staged coordinator still does not rank global and native checkpoints by
+future completion difficulty. A failed global job now retains a physically
+checked native checkpoint when one exists; final acceptance remains mandatory.
+See the [workflow limitations](docs/workflows/stm32.md#routing-quality).
+
+- Make native component ordering depend on conductor geometry rather than
+  random identities or iteration order.
+- Preserve failed-attempt history across ordinary and provisional recovery.
+- In turns mode, balance displacement cost and heuristic guidance to avoid
+  cutting completed connections when a cheaper bypass is available.
 
 - Index native copper artwork, text and footprint fields in both local
   collision oracles; exclude registration targets from physical milling edges.

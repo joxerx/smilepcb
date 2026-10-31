@@ -100,6 +100,7 @@ def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
     from smilepcb.routing_style import apply_style
     from .recovery_steps import short_spokes,shift_blocking_vias
     start=time.monotonic();stop=min(deadline,start+82)
+    attempt_counts=dict(request.get('attempt_counts',{}))
     before=snapshot(board);old=pad_gaps(board);old_groups=pad_partitions(board,stop)
     if not set(protected)<=before['tracks'].keys():raise ValueError('Missing protected source copper')
     negotiation=strategy in ('plane_negotiate','signal_negotiate')
@@ -140,9 +141,12 @@ def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
                 # displacement cost and cut every bus along a straight path.
                 router.connection_budget_s=18;router.search_budget_s=18;router.allow_penalty_fallback=False
                 router.displacement_cost_nm=p.FromMM(1)
+                if router.quality.name=='turns':
+                    router.displacement_cost_nm=p.FromMM(5)
+                    router.heuristic_weight=2
                 router.via_cost_nm=1000000;router.layer_change_heuristic_nm=0
             return router
-        plan=negotiate_routes(board,selected,protected,min(stop-25,start+25),router_factory=factory,required_pad_ids=required)
+        plan=negotiate_routes(board,selected,protected,min(stop-25,start+25),router_factory=factory,required_pad_ids=required,attempt_counts=attempt_counts)
         details['plane_negotiation' if strategy=='plane_negotiate' else 'signal_negotiation']=plan;removed.update(plan['removed'])
         added+=plan['added']+plan['retained_fragments']
         target={before['tracks'][uid]['net'] for uid in removed}-set(plane_nets)
@@ -168,6 +172,7 @@ def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
             return {**details,'accepted':False,'pad_group_gaps':sum(old.values())}
         removed.update(move['uuid'] for move in details['moves']);added+=details['added_ids'];target=set()
     router=completion_router(board,min(stop-(12 if negotiation else 25),start+52))
+    router.attempt_counts=attempt_counts
     joined=route_components(board,router,target) if target else 0
     added+=router.added
     # Only new copper is styled. Retained original conductors stay exact.
@@ -181,7 +186,7 @@ def repair_candidate(board,strategy,*,protected,plane_nets,request,deadline):
         if zones and not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Return refill failed')
         after=pad_gaps(board)
     result={**details,'accepted':False,'before':old,'after':after,'connections':joined,
-            'pad_group_gaps':sum(old.values()),'graph':getattr(router,'graph_diagnostic',{}),'removed_source_ids':sorted(removed)}
+            'pad_group_gaps':sum(old.values()),'graph':{**getattr(router,'graph_diagnostic',{}),'attempt_counts':dict(attempt_counts)},'removed_source_ids':sorted(removed)}
     if sum(after.values())<sum(old.values()):
         current=snapshot(board)
         if (before['footprints']!=current['footprints'] or any(current['tracks'].get(uid)!=shape

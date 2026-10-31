@@ -104,3 +104,40 @@ def test_invalid_quality_is_rejected_before_starting_native_work(tmp_path,monkey
     monkeypatch.setattr(sys,'argv',[*sys.argv,'--routing-quality','bogus'])
     with pytest.raises(ValueError,match='routing quality'):driver.main()
     assert calls==[] and not (base/'output').exists()
+
+
+@pytest.mark.parametrize('failure',['timeout','nonzero'])
+def test_failed_global_retains_physically_checked_native_progress(tmp_path,monkeypatch,failure):
+    """A bounded external failure must not discard the usable native board."""
+    import subprocess
+    driver,base,source,calls=setup_driver(tmp_path,monkeypatch,native_gaps=7)
+    def fail(command,**kwargs):
+        if failure=='timeout':raise subprocess.TimeoutExpired(command,1000)
+        raise subprocess.CalledProcessError(1,command)
+    monkeypatch.setattr(driver.subprocess,'run',fail)
+    driver.main()
+    out=base/'output'
+    actual=(out/'project/keyboard.kicad_pcb').read_bytes()
+    assert actual==(out/'native-attempt/project/keyboard.kicad_pcb').read_bytes()
+    assert b'|components' in actual and b'|global' not in actual
+    result=json.loads((out/'result.json').read_text())
+    assert result['complete'] is False
+    assert result['independent']['pad_group_gaps']==7
+    assert result['selected_path']=='ordered-native-after-global-failure'
+    assert result['global_attempt_error']
+    assert (out/'native-checks/summary.json').is_file()
+    assert (source/'keyboard.kicad_pcb').read_text()=='placed only'
+
+
+def test_failed_global_does_not_restore_physically_invalid_native(tmp_path,monkeypatch):
+    """An archived snapshot is not eligible merely because its file exists."""
+    import subprocess
+    driver,base,source,calls=setup_driver(tmp_path,monkeypatch,native_gaps=7)
+    import smilepcb.lab_tools as lab_tools
+    monkeypatch.setattr(lab_tools,'rule_checks',lambda *_a,**_k:{'erc':{'severity':{}},'drc':{'severity':{'error':1},'schematic_parity':0}})
+    def fail(command,**kwargs):raise subprocess.CalledProcessError(1,command)
+    monkeypatch.setattr(driver.subprocess,'run',fail)
+    with pytest.raises(subprocess.CalledProcessError):driver.main()
+    assert not (base/'output/result.json').exists()
+    assert not (base/'output/project').exists()
+    assert (source/'keyboard.kicad_pcb').read_text()=='placed only'

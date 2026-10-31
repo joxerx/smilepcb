@@ -9,7 +9,9 @@ SmilePCB combines reusable circuit rules, component placement, GPIO assignment,
 routing and native checks. It builds on public keyboard designs and established
 community tools rather than replacing KiCad or QMK.
 
-**0.2.0rc1 is experimental; repeated full-board qualification did not pass.**
+**0.2.0rc1 follow-up fixes are awaiting fresh qualification.**
+The measured report below covers an earlier candidate whose repeated full-board
+qualification did not pass. For that earlier candidate:
 One fresh 61-key build and one fresh 68-key build passed the software workflow:
 two copper layers, zero native ERC/DRC findings under the
 [documented rule profile](docs/workflows/stm32.md#rule-scope), zero independent
