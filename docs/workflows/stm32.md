@@ -140,6 +140,8 @@ The candidate did not pass repeated full-board qualification. A successful
 individual build does not establish repeatable completion or identical geometry.
 The earlier 0.1.0 results do not qualify this new mode.
 
+The staged coordinator does not yet compare both retained routing checkpoints. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups; a failed global job stops the workflow while the native attempt remains available only as diagnostic evidence. This is a known recovery limitation, not evidence that selecting the checkpoint with fewer gaps would complete the board.
+
 ## Rule scope
 
 KiCad checks run with `--severity-all` and schematic parity. Accepted projects

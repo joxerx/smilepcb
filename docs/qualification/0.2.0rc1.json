@@ -190,5 +190,6 @@
     "No repeatable completion or identical-route guarantee.",
     "No comparative speed, memory or appearance improvement claim against an unmatched baseline.",
     "Only accepted outputs may be described as passing native checks."
-  ]
+  ],
+  "known_coordinator_limitation": "The staged coordinator does not yet compare both retained routing checkpoints. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups; a failed global job stops the workflow while the native attempt remains available only as diagnostic evidence. This is a known recovery limitation, not evidence that selecting the checkpoint with fewer gaps would complete the board."
 }

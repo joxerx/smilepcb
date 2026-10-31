@@ -10,6 +10,11 @@ QMK, but a second 68-key build stopped with five connections remaining. The
 fourth planned trial was not run. This candidate does not establish repeatable
 completion. See [measurements](docs/qualification/0.2.0rc1.json).
 
+The staged coordinator also retains a known fallback limitation: global routing
+can replace a better-connected native checkpoint, and a global job failure
+stops the workflow rather than resuming that checkpoint. See the
+[workflow limitations](docs/workflows/stm32.md#routing-quality).
+
 - Index native copper artwork, text and footprint fields in both local
   collision oracles; exclude registration targets from physical milling edges.
 - Apply the routed net's effective clearance as well as the obstacle's, including
