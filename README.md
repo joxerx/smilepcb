@@ -9,18 +9,26 @@ SmilePCB combines reusable circuit rules, component placement, GPIO assignment,
 routing and native checks. It builds on public keyboard designs and established
 community tools rather than replacing KiCad or QMK.
 
-**0.2.0rc1 follow-up fixes are awaiting fresh qualification.**
-The measured report below covers an earlier candidate whose repeated full-board
-qualification did not pass. For that earlier candidate:
-One fresh 61-key build and one fresh 68-key build passed the software workflow:
-two copper layers, zero native ERC/DRC findings under the
+**0.2.0rc1 is an experimental prerelease.**
+Four fresh builds passed the complete software workflow on the tested stack:
+two each of the supplied 61-key and 68-key RGB layouts, two copper layers,
+zero native ERC/DRC findings under the
 [documented rule profile](docs/workflows/stm32.md#rule-scope), zero independent
-connectivity gaps and clean matching QMK builds. A second 68-key build stopped
-with five matrix connections remaining. The series stopped before the fourth
-planned run. See the [measured results](docs/qualification/0.2.0rc1.json).
-Completion and identical routing are not guaranteed, even for the supplied
-fixtures. Incomplete runs retain diagnostics and are not accepted outputs.
-Generated hardware has not been fabricated or tested.
+connectivity gaps and clean matching QMK builds.
+
+| Layout | Fresh trials passed | Full command time | Largest process peak RSS |
+| --- | --- | --- | --- |
+| ANSI61 + RGB | 2/2 | 20:20–20:42 | 905–913 MiB |
+| compact68 + RGB | 2/2 | 28:12–30:22 | 847–945 MiB |
+
+Times include all internal attempts. Memory is the largest individual supervised
+process, not a simultaneous process-tree total. See the
+[exact measurements and source fingerprints](docs/qualification/0.2.0rc1.json).
+These samples qualify the supplied fixtures and runtime only. They do not
+guarantee completion, identical copper or reference-quality appearance for
+another run or layout. Incomplete runs retain diagnostics and are not accepted.
+Generated hardware has not been fabricated or tested. No speed or memory
+improvement against an unmatched baseline is claimed.
 
 ## Supported workflow
 
@@ -65,7 +73,7 @@ The command accepts a result only after native rule, connectivity and firmware
 checks; failed runs retain diagnostics. Runtime and routing success depend on the
 layout and toolchain. The completion budget is not a deadline for the whole run.
 
-## Candidate routing improvements
+## Routing changes in 0.2.0rc1
 
 The candidate fixes copper artwork/field obstacles and routed-net clearance
 checks. The existing routing policy remains the default. Add
@@ -78,9 +86,23 @@ Preparation now prefers connected signal banks when placing controller supports,
 tries coupled 45-degree USB joins, and reuses existing local return vias. The
 existing native packing, clearance and source-preservation checks remain required.
 
+Recovery now keeps failed-attempt history across stages and orders native
+connection groups by geometry. Its final disposable search can move generated
+neighbors more readily, while accepting only a fully connected, checked result.
+
 This option does not guarantee a complete route, fewer vias or reference-quality
 appearance. It does not change fabrication rules, widths, budgets or admission.
 See the [routing policy](docs/workflows/stm32.md#routing-quality).
+
+## Example output
+
+![compact68 RGB: actual front and back copper from an accepted fresh build](docs/images/0.2.0rc1-compact68-rgb.png)
+
+Native KiCad plots from trial 1; both faces are viewed from the front. Ground
+fills are hidden in a display copy for inspection; source copper is unchanged.
+The controller region remains dense. See the
+[61-key RGB example](docs/images/0.2.0rc1-ansi61-rgb.png) and the measured report
+for the source PCB and image hashes.
 
 ## CLI and MCP
 

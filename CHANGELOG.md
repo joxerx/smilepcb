@@ -2,14 +2,19 @@
 
 Changes are recorded here and on the GitHub Releases page.
 
-## 0.2.0rc1 — candidate (2026-10-31)
+## 0.2.0rc1 — prerelease (2026-10-31)
 
-Experimental candidate. Follow-up fixes are awaiting fresh qualification.
-The earlier measured cohort did not pass repeated full-board qualification: fresh
-61-key and 68-key builds reached ERC/DRC/connectivity zero with clean matching
-QMK, but a second 68-key build stopped with five connections remaining. The
-fourth planned trial was not run. This candidate does not establish repeatable
-completion. See [measurements](docs/qualification/0.2.0rc1.json).
+Experimental prerelease. Four fresh current-source builds passed the full
+KLE → two-layer RGB PCB → clean matching QMK workflow: two each of ANSI61 and
+compact68. All have zero native ERC/DRC findings under the documented profile,
+zero schematic parity/unconnected findings and zero independent pad-group gaps.
+Measured full-command times are 20:20–20:42 for ANSI61 and 28:12–30:22 for
+compact68. See [measurements](docs/qualification/0.2.0rc1.json).
+
+Qualification covers the supplied fixtures on the documented runtime. It does
+not establish universal completion, identical geometry, reference-quality
+appearance or fabricated-hardware validation. No comparative performance claim
+is made against an unmatched baseline.
 
 The staged coordinator still does not rank global and native checkpoints by
 future completion difficulty. A failed global job now retains a physically
@@ -23,7 +28,6 @@ See the [workflow limitations](docs/workflows/stm32.md#routing-quality).
   candidates without relaxing physical rules or admitting partial results.
 - In turns mode, balance displacement cost and heuristic guidance to avoid
   cutting completed connections when a cheaper bypass is available.
-
 - Index native copper artwork, text and footprint fields in both local
   collision oracles; exclude registration targets from physical milling edges.
 - Apply the routed net's effective clearance as well as the obstacle's, including

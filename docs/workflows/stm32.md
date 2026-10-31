@@ -1,12 +1,12 @@
 # Fresh STM32 KLE → PCB → QMK replay
 
 This experimental source-checkout workflow uses `ansi61` and `compact68`.
-Follow-up routing fixes in this checkout are awaiting fresh qualification.
-The earlier candidate had one accepted fresh build of each, but its repeated
-68-key trial failed with five connections remaining. Repeated qualification
-has not passed; see the [measured results](../qualification/0.2.0rc1.json).
+Version 0.2.0rc1 passed four fresh full builds on the documented stack, two per
+RGB layout, with zero native findings under the explicit rule profile,
+zero independent connectivity gaps and clean matching QMK. See the
+[measured results and source fingerprints](../qualification/0.2.0rc1.json).
 Run commands from the checkout root. Existing routed keyboards are never cold
-inputs.
+inputs. Other layouts, runtimes and future runs are not guaranteed to complete.
 
 ## External tools
 
@@ -142,9 +142,10 @@ SMILEPCB_KICAD_PYTHON=/path/to/KiCad.app/Contents/Frameworks/Python.framework/Ve
   .venv/bin/python -m pytest -q tests/test_native_physical_obstacles.py
 ```
 
-The candidate did not pass repeated full-board qualification. A successful
-individual build does not establish repeatable completion or identical geometry.
-The earlier 0.1.0 results do not qualify this new mode.
+The four recorded current-source trials passed independently from fresh KLE
+inputs with the same code, process profile, toolchain and budgets. These samples
+do not establish identical geometry or a universal completion guarantee. The
+earlier 0.1.0 results are not used to qualify this new mode.
 
 The staged coordinator does not yet rank both retained routing checkpoints by future completion difficulty. Its global fallback can replace an incomplete native attempt with one that has more unconnected groups. If a global job fails, an available physically checked native checkpoint is retained for completion; otherwise the workflow fails. Selecting the checkpoint with fewer gaps alone has not been shown to complete the board.
 
