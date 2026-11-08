@@ -1,13 +1,13 @@
 # Reference-style routing
 
-The0.3.0 profile is selected with `--unified-controller-plan`,
+The 0.3.0 profile is selected with `--unified-controller-plan`,
 `--component-corridors`, `--coherent-via-banks` and `--routing-quality turns`.
 The README records the complete tested build command and budgets.
 These options are explicit rather than silently changing the older defaults.
 
 ## Geometry and ordering
 
-Rows use long horizontal trunks; the column field uses vertical and45-degree
+Rows use long horizontal trunks; the column field uses vertical and 45-degree
 segments on the other copper face. The profile follows the actual controller
 face and available geometry, rather than requiring all keyboards to use one
 fixed front/back assignment. Controller feeders may cross the field through
@@ -42,9 +42,9 @@ placements, rather than manually chosen successful checkpoints. Check final
 ERC/DRC/parity, saved-board connectivity, preserved key/LED centres and matching
 clean firmware receipts. A locally accepted placement is not a completed PCB.
 
-The0.3.0 repeat cohort is being finalized before publication. Its scope is
+The 0.3.0 repeat cohort is being finalized before publication. Its scope is
 ANSI61 and Compact68 with RGB, two copper layers and the pinned toolchain.
-Arbitrary layouts, dense40% fixed-outline controller placement and ANSI104 RGB
+Arbitrary layouts, dense 40% fixed-outline controller placement and ANSI104 RGB
 are outside that qualification scope. Exact geometry and timing can vary with
 search deadlines and native IDs; repeated success is not universal proof.
 

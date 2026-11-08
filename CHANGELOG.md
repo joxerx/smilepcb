@@ -14,7 +14,7 @@ Changes are recorded here and on the GitHub Releases page.
   across physical space instead of exhausting one narrow prefix.
 - Expose the same generator through bounded, serialized CLI/MCP jobs with
   cancellation cleanup and explicit input/output/tool paths.
-- Repeat full ANSI61/Compact68 RGB qualification before publication. Dense40%
+- Repeat full ANSI61/Compact68 RGB qualification before publication. Dense 40%
   and ANSI104 RGB remain outside the qualified scope; no hardware test is claimed.
 - Preserve existing licenses, public source attribution and the documented
   five-category DRC rule scope.

@@ -9,7 +9,7 @@ SmilePCB automates placement, GPIO assignment, two-layer routing and native
 checks for STM32F072CBT6 keyboards with a USB-C daughterboard connection,
 MX hot-swap switches and optional SK6812MINI-E per-key RGB.
 
-Version0.3.0 adds a complete installed KLE build workflow and an opt-in routing
+Version 0.3.0 adds a complete installed KLE build workflow and an opt-in routing
 profile with straight row trunks, vertical/45-degree columns on the opposite
 copper face, and grouped controller approaches. See the
 [routing guide](docs/reference-style-routing.md) for the profile and limits.
@@ -21,7 +21,7 @@ runtime only. Software checks do not establish fabricated-hardware validation.
 
 ## Install
 
-Python3.11+ is required. Install the wheel from the
+Python 3.11+ is required. Install the wheel from the
 [Releases page](https://github.com/joxerx/smilepcb/releases), or install source:
 
 ```sh
@@ -32,7 +32,7 @@ python -m pip install .
 
 The package contains the complete coordinator, stage workers and fixture inputs.
 Native tools and donor CAD are installed separately. The tested toolchain is
-macOS arm64, KiCad10.0.7, Java25, Freerouting2.5.0 and pinned QMK/ARM tools.
+macOS arm64, KiCad 10.0.7, Java 25, Freerouting 2.5.0 and pinned QMK/ARM tools.
 Follow the [STM32 setup guide](docs/workflows/stm32.md).
 
 ## Build from KLE
@@ -55,13 +55,13 @@ smilepcb build --kle ./layout.kle.json --config ./keyboard.json \
 
 `none` disables only the geometric USB length cap. It preserves clearance,
 connectivity, pair-skew and the current single-layer/no-via USB checks; it is
-not an impedance or signal-integrity proof. The ordinary default remains20mm.
-The600-second options bound their stages, not the whole command. Run one heavy
+not an impedance or signal-integrity proof. The ordinary default remains 20 mm.
+The 600-second options bound their stages, not the whole command. Run one heavy
 build at a time; heuristic routing does not guarantee completion on any layout.
 
 The package includes ANSI61, Compact68 and a smaller ST40-derived input. Only
 layouts explicitly listed in a release report have full-board qualification.
-No40%/ANSI104 RGB completion guarantee is made for0.3.0.
+No 40%/ANSI104 RGB completion guarantee is made for 0.3.0.
 
 ## Outputs and acceptance
 
