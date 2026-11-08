@@ -27,6 +27,35 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install development tools
         run: python -m pip install -e '.[test]' build
+      - name: Prepare pinned MCU symbol data for host model tests
+        run: |
+          python - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          from urllib.request import urlopen
+          import sexpdata as sx
+
+          # Official KiCad symbols 10.0.7; no native CAD executable is needed.
+          commit = 'e1bb0a65cb243525367c5dc7294665b9fd57fc4d'
+          expected = {
+              'STM32F072C_8-B_Tx': '2224097bab12bfddc34e52c5d2c62a2d1b11040040879f19fd3810e5b953d797',
+              'STM32F072CBTx': 'a2ab6b9dba2563834b36329815ed36906d36ab0f55cb0e0cc66d98efbc422605',
+          }
+          symbols = []
+          for name, sha in expected.items():
+              url = f'https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/{commit}/MCU_ST_STM32F0.kicad_symdir/{name}.kicad_sym'
+              with urlopen(url, timeout=60) as response:
+                  data = response.read()
+              assert hashlib.sha256(data).hexdigest() == sha, 'Unexpected official symbol data'
+              symbols.extend(item for item in sx.loads(data.decode())
+                             if isinstance(item, list) and item and str(item[0]) == 'symbol')
+          support = Path(os.environ['RUNNER_TEMP']) / 'kicad-host-symbols'
+          (support / 'symbols').mkdir(parents=True)
+          tree = [sx.Symbol('kicad_symbol_lib'), [sx.Symbol('version'), 20251024], *symbols]
+          (support / 'symbols/MCU_ST_STM32F0.kicad_sym').write_text(sx.dumps(tree))
+          with open(os.environ['GITHUB_ENV'], 'a') as environment:
+              environment.write(f'SMILEPCB_KICAD_SUPPORT={support}\n')
+          PY
       - name: Run tests without native CAD dependencies
         run: python -m pytest -q tests
       - name: Check installed entry points
