@@ -31,15 +31,20 @@ def test_model_directed_same_row_data_pads_face_the_next_package(name,links):
     assert checked==links
 
 
-@pytest.mark.parametrize('name,want',[
-    ('ansi61','3adb2ccce7d8218663a9cc7303697a49953b5145dcbffa5c6e27168c278f3b8d'),
-    ('compact68','f68b8d4318503fc63f9d325a269f04be850fcf49eaf6adcfbbfea95dcc4d4332'),
+@pytest.mark.parametrize('name,frozen_length,want',[
+    ('ansi61',1460.4814792382322,'3adb2ccce7d8218663a9cc7303697a49953b5145dcbffa5c6e27168c278f3b8d'),
+    ('compact68',1621.1105553356422,'f68b8d4318503fc63f9d325a269f04be850fcf49eaf6adcfbbfea95dcc4d4332'),
 ])
-def test_model_changes_only_led_rotation_from_frozen_7f(name,want):
+def test_model_changes_only_led_rotation_from_frozen_7f(name,frozen_length,want):
     source=layout(name);old=deepcopy(source);cfg=design(source,controller_origin_mm=(120,70))
     assert source==old
     for part in cfg['parts']:
         if part['symbol']=='KeyboardParts:MINI_E':part.pop('rotation')
+    # Float summation differs at the last bits across Python versions. Check
+    # the diagnostic estimate to sub-nanometre precision, then preserve the
+    # original frozen hash for every model field, including physical geometry.
+    assert cfg['rgb_routing']['estimated_path_mm']==pytest.approx(frozen_length,rel=0,abs=1e-9)
+    cfg['rgb_routing']['estimated_path_mm']=frozen_length
     assert hashlib.sha256(json.dumps(cfg,sort_keys=True,separators=(',',':')).encode()).hexdigest()==want
 
 
