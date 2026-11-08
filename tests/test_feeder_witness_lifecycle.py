@@ -24,10 +24,14 @@ class Track(NativeStateSeams.Track):
 
 class Pad(Track):
     def GetNumber(self): return '1'
+    def GetNetname(self): return self.data['net']
+    def GetPosition(self): return SimpleNamespace(x=self.data['start'][0], y=self.data['start'][1])
 
 
 class Board(NativeStateSeams.Board):
     def GetDesignSettings(self): return SimpleNamespace(m_TrackMinWidth=150000)
+    def GetFootprints(self):
+        return [SimpleNamespace(GetReference=lambda: 'package', Pads=lambda: self.pads)]
 
 
 def frame(board):

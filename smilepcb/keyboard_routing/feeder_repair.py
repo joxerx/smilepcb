@@ -253,28 +253,57 @@ def repair_feeders(board, nets, protected, *, deadline, ports=None, source_ports
 
 
 
-def _restore_participant_partitions(board,partitions,affected,pad_nets,matrix_nets,factory,*,deadline):
+def _restore_participant_partitions(board,partitions,affected,pad_nets,matrix_nets,factory,*,deadline,history=None):
     from .completion import pad_partitions
-    rows=[];added=set()
+    rows=[] if history is None else history;added=set()
     def connected(group,current):return any(set(group)<=set(other) for other in current)
-    ordered=sorted(partitions,key=lambda g:(pad_nets[next(iter(g))] not in matrix_nets,-len(g),sorted(g)))
+    # UUIDs bind the proof, while actual pad geometry determines trial order.
+    pad_order={}
+    for footprint in board.GetFootprints():
+        for pad in footprint.Pads():
+            uid=pad.m_Uuid.AsString()
+            if uid not in pad_nets or not pad.GetNumber():continue
+            if pad.GetNetname()!=pad_nets[uid]:raise ValueError('Recovery pad net binding changed')
+            position=pad.GetPosition()
+            pad_order[uid]=(pad.GetNetname(),footprint.GetReference(),pad.GetNumber(),position.x,position.y)
+    def partition_key(group):
+        if not group or not set(group)<=pad_order.keys():raise ValueError('Recovery partition lacks actual numbered pads')
+        keys=tuple(sorted(pad_order[uid] for uid in group))
+        if len({key[0] for key in keys})!=1:raise ValueError('Recovery partition crosses physical nets')
+        return (keys[0][0] not in matrix_nets,-len(group),keys)
+    ordered=sorted(partitions,key=partition_key)
     current=pad_partitions(board,deadline)
     for group in ordered:
         names={pad_nets[u] for u in group}
         if len(names)!=1:raise ValueError('Recovery partition crosses physical nets')
         net=next(iter(names))
         if net not in affected or connected(group,current):continue
-        row={'phase':'displaced_partition','net':net,'required_pad_ids':sorted(group),'history':[]};rows.append(row)
+        row={'phase':'displaced_partition','net':net,'required_pad_ids':sorted(group),'history':[],'partition_proof_checked':False};rows.append(row)
         for grid in (500000,125000):
-            if deadline-time.monotonic()<=2:break
-            router=factory(board,deadline=min(deadline,time.monotonic()+22),compact=True)
+            started=time.monotonic()
+            if deadline-started<=2:break
+            search_stop=min(deadline-2,started+22)
+            attempt=dict(grid_nm=grid,search_deadline=search_stop,proof_deadline=deadline)
+            row['history'].append(attempt);row.pop('restored',None);row['partition_proof_checked']=False
+            router=factory(board,deadline=search_stop,compact=True)
             router.grid_step=grid;router.connection_budget_s=20;router.search_budget_s=20;router.routing_penalty=None
-            from .native_graph import route_components
-            count=route_components(board,router,{net},required_pad_ids=set(group),refresh_components=True,prefer_small_goal=True)
-            added.update(getattr(router,'added',()))
-            row['history'].append({'grid_nm':grid,'connections':count,'graph':getattr(router,'graph_diagnostic',{})})
-            current=pad_partitions(board,deadline)
-            row['restored']=connected(group,current)
+            try:
+                from .native_graph import route_components
+                try:
+                    attempt['connections']=route_components(board,router,{net},required_pad_ids=set(group),refresh_components=True,prefer_small_goal=True)
+                except TimeoutError as error:
+                    now=time.monotonic()
+                    if not search_stop<=now<deadline:raise
+                    # A phase timeout says nothing about actual pad closure.
+                    # Spend its reserved proof window before trying another grid.
+                    attempt['search_timeout']=str(error)
+                current=pad_partitions(board,deadline)
+                row.update(partition_proof_checked=True,restored=connected(group,current))
+            except (ValueError,TimeoutError) as error:
+                attempt['reason']=str(error);raise
+            finally:
+                added.update(getattr(router,'added',()))
+                attempt.update(graph=getattr(router,'graph_diagnostic',{}),elapsed_s=time.monotonic()-started)
             if row['restored']:break
     return rows,added
 
@@ -410,7 +439,8 @@ def _repair_feeders(board,nets,protected,*,deadline,ports=None,source_ports=None
                 if not plan['connected'] and not removed_originals:
                     row.update(after=missing,reason='No negotiated connection');break
                 if displaced:row['replanned_proposal_ids']=proposals
-                attempts=[];created=set(plan.get('added',()))|set(plan.get('retained_fragments',()))
+                attempts=[];row['restoration']=attempts
+                created=set(plan.get('added',()))|set(plan.get('retained_fragments',()))
                 grids=(500000,250000,125000)
                 # Finish the missing-net ladder before an incumbent can heal
                 # its old crossing. A later fine success must not leave every
@@ -437,8 +467,8 @@ def _repair_feeders(board,nets,protected,*,deadline,ports=None,source_ports=None
                         attempts.append({'grid_nm':grid,'phase':phase,'connections':count,'graph':getattr(router,'graph_diagnostic',{})})
                 if participant_ownership is not None and displaced:
                     pad_nets={q['uuid']:q['net'] for f in before['footprints'].values() for q in f['pads']}
-                    rows,added=_restore_participant_partitions(board,partitions,displaced,pad_nets,nets,factory,deadline=stop-1)
-                    attempts.extend(rows);created.update(added)
+                    rows,added=_restore_participant_partitions(board,partitions,displaced,pad_nets,nets,factory,deadline=stop-1,history=attempts)
+                    created.update(added)
                 graph=copper_graph(board,covered,deadline)
                 after=_pad_state(graph,nets)['missing']
                 if guards:
