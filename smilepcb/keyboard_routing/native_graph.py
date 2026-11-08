@@ -27,6 +27,7 @@ def island_points(shape):
 
 
 def nearest_on_island(shape,position):
+    position=tuple(round(value) for value in position)
     point=vec(position)
     if shape.Contains(point):return position
     chains=[chain for i in range(shape.OutlineCount())
@@ -53,6 +54,7 @@ def routing_points(node):
 
 
 def nearest_to_node(node,position):
+    position=tuple(round(value) for value in position)
     if node['zone']:
         routing_points(node)
         return nearest_on_island(node['routing_shape'],position)
@@ -127,7 +129,7 @@ def copper_graph(board,nets,deadline=None,*,include_zones=True):
                     buckets[layer].setdefault((x,y),[]).append(i)
     groups={}
     for i in range(len(nodes)):groups.setdefault(find(i),[]).append(i)
-    return dict(nodes=nodes,groups=groups,find=find,join=join)
+    return dict(nodes=nodes,groups=groups,find=find,join=join,nets=set(nets))
 
 
 def stitch_zones(board,router,nets,include_signals=False):
@@ -229,13 +231,53 @@ def attach_vias(board,router,ids):
     return count
 
 
-def route_components(board,router,nets,*,interface_refs=(),required_pad_ids=None):
+def route_components(board,router,nets,*,interface_refs=(),required_pad_ids=None,finer_grid_steps=(),refresh_components=False,prefer_small_goal=False,_refresh_state=None):
     from .grid_search import search_many
-    graph=copper_graph(board,nets,router.deadline);nodes=graph['nodes'];join=graph['join'];find=graph['find']
+    # A caller may defer a broad reverse only when its real resolution ladder
+    # still contains a finer opportunity. Single/final resolutions keep it.
+    finer_grid_steps=tuple(finer_grid_steps);previous=getattr(router,'grid_step',250000)
+    for step in finer_grid_steps:
+        if type(step) is not int or not 0<step<previous:
+            raise ValueError('Remaining grid steps must be positive and strictly finer')
+        previous=step
+    if type(refresh_components) is not bool:raise ValueError('Component refresh must be boolean')
+    if type(prefer_small_goal) is not bool:raise ValueError('Small goal preference must be boolean')
+    if refresh_components and _refresh_state is None:
+        # One iterative owner, one unchanged router/deadline. Each inner pass
+        # stops at its first accepted join; the next pass reads actual copper,
+        # including incidental merges and newly emitted branch contacts.
+        state={'domains':set(),'attempts':[],'attempt_counts':getattr(router,'attempt_counts',{}),
+            'graph_passes':0,'skipped_unchanged_domains':0}
+        total=0;nets=set(nets);interface_refs=tuple(interface_refs)
+        required_pad_ids=None if required_pad_ids is None else frozenset(required_pad_ids)
+        try:
+            while not router.expired():
+                state['joined']=False;state['graph_passes']+=1
+                total+=route_components(board,router,nets,interface_refs=interface_refs,required_pad_ids=required_pad_ids,
+                    finer_grid_steps=finer_grid_steps,refresh_components=True,prefer_small_goal=prefer_small_goal,_refresh_state=state)
+                if not state['joined']:break
+            return total
+        finally:
+            router.graph_diagnostic={'attempts':state['attempts'],'attempt_counts':dict(state['attempt_counts']),
+                'current_component_refresh':True,'graph_passes':state['graph_passes'],
+                'skipped_unchanged_domains':state['skipped_unchanged_domains']}
+    inventory=getattr(router,'port_policy',None) or getattr(router,'launch_policy',None)
+    interface_nets={q['net'] for q in inventory.ports} if inventory is not None else set()
+    # One exact graph covers both requested routing and interface lifecycle.
+    # Include unrelated interfaces so a rollback cannot leave a stale closure.
+    graph=copper_graph(board,set(nets)|interface_nets,router.deadline);nodes=graph['nodes'];join=graph['join'];find=graph['find']
+    refresh=getattr(router,'refresh_interfaces',None)
+    if refresh is not None:refresh(graph)
+    pad_nodes={}
+    for i,node in enumerate(nodes):
+        if isinstance(node['item'],p.PAD) and node['item'].GetNumber():
+            pad_nodes.setdefault(node['net'],[]).append(i)
     def terminals(indices):
+        policy=getattr(router,'port_policy',None)
+        if policy is not None:return sorted(policy.contacts(graph,indices,(0,0)))
         return sorted({(point,layer) for i in indices for point in routing_points(nodes[i]) for layer in nodes[i]['shapes']})
     groups=[(indices,terminals(indices)) for indices in graph['groups'].values()
-            if any(isinstance(nodes[i]['item'],p.PAD) and nodes[i]['item'].GetNumber()
+            if nodes[indices[0]]['net'] in nets and any(isinstance(nodes[i]['item'],p.PAD) and nodes[i]['item'].GetNumber()
                    and (required_pad_ids is None or nodes[i]['item'].m_Uuid.AsString() in required_pad_ids)
                    for i in indices)]
     anchors=set();attached=set()
@@ -261,6 +303,10 @@ def route_components(board,router,nets,*,interface_refs=(),required_pad_ids=None
             spread.extend(contacts[i*(len(contacts)-1)//max(1,size-1)] for i in range(size))
         return sorted(set(near+spread))
     def contacts(indices,points,toward):
+        policy=getattr(router,'port_policy',None)
+        if policy is not None:
+            center=tuple(sum(q[0][i] for q in toward)/len(toward) for i in (0,1))
+            return bounded(sorted(policy.contacts(graph,indices,center)),toward)
         # Endpoints alone can hide a legal branch into the middle of a long
         # conductor. Project the other component's anchors onto native copper;
         # keep the search bounded and let its collision oracle vet each lead.
@@ -287,27 +333,85 @@ def route_components(board,router,nets,*,interface_refs=(),required_pad_ids=None
             aa,bb=contacts(a,aa,bb),contacts(b,bb,aa)
             length=min(distance(x[0],y[0]) for x in aa for y in bb)
             pairs.append((length,a,b,aa,bb))
-    count=0;outer=router.deadline;attempts=[]
-    def attempt(starts,targets,net):
-        stop=min(outer or float('inf'),time.monotonic()+getattr(router,'connection_budget_s',5))
+    count=0;outer=router.deadline;attempts=[] if _refresh_state is None else _refresh_state['attempts']
+    component_ids={tuple(indices):tuple(sorted(nodes[i]['item'].m_Uuid.AsString() for i in indices))
+        for indices,_ in groups} if _refresh_state is not None else {}
+    def unescaped(indices):
+        if inventory is None:return False
+        # Earlier pairs may have joined this source to real field copper.
+        # Classify the current union, not its original per-pair index list.
+        root=find(indices[0]);indices=[i for i in range(len(nodes)) if find(i)==root]
+        ids={nodes[i]['item'].m_Uuid.AsString() for i in indices}
+        pads={nodes[i]['item'].m_Uuid.AsString() for i in indices
+              if isinstance(nodes[i]['item'],p.PAD) and nodes[i]['item'].GetNumber()}
+        return any(pads==set(port['pad_ids']) and (port.get('terminal_id') or port.get('via_id')) in ids
+                   for port in inventory.live_ports)
+    def pad_face_proposal(a,b,net,end):
+        # A physical pad face is a proposal, not a restriction on the later
+        # multi-contact search. Constrained calls retain their exact contract.
+        if interface_refs or required_pad_ids is not None or not callable(getattr(router,'leg',None)):
+            return False,None
+        indices=pad_nodes.get(net,())
+        if len(indices)!=2 or any(nodes[i]['item'].GetAttribute()!=p.PAD_ATTRIB_SMD for i in indices):return False,None
+        if {find(i) for i in indices}!={find(a[0]),find(b[0])}:return False,None
+        faces=[set(nodes[i]['shapes']) for i in indices]
+        if any(len(face)!=1 for face in faces) or faces[0]!=faces[1]:return False,None
+        layer=next(iter(faces[0]));points=[xy(nodes[i]['item'].GetPosition()) for i in indices]
+        if not all(p.SHAPE.Collide(p.SHAPE_CIRCLE(vec(point),0),nodes[i]['shapes'][layer],0)
+                   for i,point in zip(indices,points)):return False,None
+        started=time.monotonic();proposal={'pad_ids':[nodes[i]['item'].m_Uuid.AsString() for i in indices],
+            'points_nm':points,'layer':layer,'connection_deadline':end,'reason':'blocked'}
+        try:
+            router.deadline=end
+            path=None if router.expired() else router.leg(*points,layer,net)
+            if router.expired():proposal['reason']='connection_deadline'
+            elif path is not None:
+                penalty=getattr(router,'routing_penalty',None)
+                if penalty and any(penalty(p.SHAPE_SEGMENT(vec(x),vec(y),router.track_width),layer,net,False)!=0
+                                   for x,y in zip(path,path[1:])):
+                    proposal['reason']='preference'
+                elif router.expired():proposal['reason']='connection_deadline'
+                else:
+                    # Admission keeps live controller heads authoritative.
+                    router.add_path(path,layer,net);proposal.update(reason='connected',path_nm=path)
+            router.last_search={'reason':proposal['reason'],'proposal':'same-pad-face'}
+            return proposal['reason']=='connected',proposal
+        finally:
+            proposal['elapsed_s']=time.monotonic()-started;router.deadline=outer
+
+    def attempt(starts,targets,net,end,direction,searches):
         avoidance=getattr(router,'routing_penalty',None)
         fallback=avoidance and getattr(router,'allow_penalty_fallback',True)
-        router.deadline=min(stop,time.monotonic()+min(2,(stop-time.monotonic())/2)) if fallback else stop
-        ok=search_many(router,starts,targets,net)
-        if fallback and not ok and time.monotonic()<stop:
-            # A preference must not spend the entire connection budget
-            # exploring detours when crossing generated copper is necessary.
-            router.routing_penalty=None;router.deadline=stop
-            try:ok=search_many(router,starts,targets,net)
-            finally:router.routing_penalty=avoidance
-        router.deadline=outer
-        return ok
+        def run():
+            started=time.monotonic();entry={'direction':direction,'sources':len(starts),'targets':len(targets),
+                'grid_nm':getattr(router,'grid_step',250000),'deadline':router.deadline,
+                'connection_deadline':end,'phase':'preferred' if getattr(router,'routing_penalty',None) else 'plain'}
+            error=None
+            try:return search_many(router,starts,targets,net)
+            except Exception as exc:
+                error=type(exc).__name__;raise
+            finally:
+                entry.update(elapsed_s=time.monotonic()-started,search=dict(getattr(router,'last_search',{}) or {}))
+                if error:entry['search']={'reason':'exception','error':error}
+                searches.append(entry)
+        try:
+            if time.monotonic()>=end:return False
+            router.deadline=min(end,time.monotonic()+min(2,(end-time.monotonic())/2)) if fallback else end
+            ok=run()
+            if fallback and not ok and time.monotonic()<end:
+                # Preferences and both directions consume one connection end;
+                # a reverse request never renews an exhausted allowance.
+                router.routing_penalty=None;router.deadline=end
+                try:ok=run()
+                finally:router.routing_penalty=avoidance
+            return ok
+        finally:router.deadline=outer
     # A short but inaccessible component pair must not consume the entire
     # stage through repeated alternatives of the same net. Share attempts
     # across nets, retaining nearest-first ordering within each one.
     by_net={}
     for pair in sorted(pairs):by_net.setdefault(nodes[pair[1][0]]['net'],[]).append(pair)
-    attempt_counts=getattr(router,'attempt_counts',{})
+    attempt_counts=getattr(router,'attempt_counts',{}) if _refresh_state is None else _refresh_state['attempt_counts']
     net_order=sorted(by_net,key=lambda net:(attempt_counts.get(net,0),-by_net[net][0][0] if interface_refs else 0))
     ordered=(candidate for row in itertools.zip_longest(*(by_net[net] for net in net_order))
              for candidate in row if candidate is not None)
@@ -315,16 +419,36 @@ def route_components(board,router,nets,*,interface_refs=(),required_pad_ids=None
         if router.expired():break
         if find(a[0])==find(b[0]):continue
         if interface_refs and nodes[a[0]]['net'] in attached:continue
-        if len(bb)>len(aa):aa,bb=bb,aa
-        ok=attempt(aa,bb,nodes[a[0]]['net'])
-        if not ok and not router.expired():
-            ok=attempt(bb,aa,nodes[a[0]]['net'])
+        if _refresh_state is not None:
+            domain=(nodes[a[0]]['net'],tuple(sorted((component_ids[tuple(a)],component_ids[tuple(b)]))))
+            if domain in _refresh_state['domains']:
+                _refresh_state['skipped_unchanged_domains']+=1;continue
+            _refresh_state['domains'].add(domain)
+        a_source,b_source=unescaped(a),unescaped(b)
+        if prefer_small_goal and not (a_source or b_source or interface_refs):
+            # Multi-goal A* pays for the goal set on every expanded state.
+            # Only interchangeable ends may trade the old smaller-start rule.
+            if len(aa)<len(bb):aa,bb=bb,aa
+        elif b_source and not a_source or a_source==b_source and len(bb)<len(aa):aa,bb=bb,aa
+        end=min(outer or float('inf'),time.monotonic()+getattr(router,'connection_budget_s',5));searches=[]
+        ok,proposal=pad_face_proposal(a,b,nodes[a[0]]['net'],end)
+        if not ok:ok=attempt(aa,bb,nodes[a[0]]['net'],end,'primary',searches)
+        deferred=not ok and bool(finer_grid_steps) and getattr(router,'last_search',{}).get('reason')=='frontier_exhausted'
+        if not ok and not deferred and time.monotonic()<end and not router.expired():
+            ok=attempt(bb,aa,nodes[a[0]]['net'],end,'reverse',searches)
         attempts.append({'net':nodes[a[0]]['net'],'connected':ok,'sources':len(aa),'targets':len(bb),
-                         'search':getattr(router,'last_search',None)})
+                         'search':getattr(router,'last_search',None),'searches':searches,
+                         'reverse_deferred':deferred,'finer_grid_steps':list(finer_grid_steps),
+                         'pad_face_proposal':proposal})
+        if _refresh_state is not None:
+            attempts[-1].update(graph_pass=_refresh_state['graph_passes'],component_sizes=[len(a),len(b)])
         net=nodes[a[0]]['net'];attempt_counts[net]=attempt_counts.get(net,0)+1
         if ok:
             join(a[0],b[0]);count+=1
+            if refresh is not None:refresh(graph)
             if interface_refs:attached.add(nodes[a[0]]['net'])
+            if _refresh_state is not None:
+                _refresh_state['joined']=True;break
     router.graph_diagnostic={'attempts':attempts,'attempt_counts':dict(attempt_counts)};return count
 
 
@@ -359,6 +483,13 @@ def negotiate_routes(board,nets,protected,deadline,*,router_factory=None,attempt
     relaxed.routing_penalty=lambda shape,layer,net,via: displacement_cost*len(
         set(world.collisions(shape,layer,net,via)) & soft)
     count=route_components(board,relaxed,nets,interface_refs=interface_refs,required_pad_ids=required_pad_ids)
+    # Routing refreshes its own launch policy. Feedback keeps the original
+    # physical index, but must reobserve actual closure before using its
+    # separate launch reservations to classify hard obstacles.
+    policy=getattr(world,'port_policy',None)
+    if policy is not None:
+        covered=set(nets)|{port['net'] for port in policy.ports}
+        world.refresh_interfaces(copper_graph(board,covered,deadline))
     new={t.m_Uuid.AsString():t for t in board.GetTracks() if t.m_Uuid.AsString() in relaxed.added}
     blockers=set()
     for track in new.values():
@@ -374,7 +505,7 @@ def negotiate_routes(board,nets,protected,deadline,*,router_factory=None,attempt
         raise ValueError('Negotiation touched a hard routing obstacle: '+repr(details))
     from .carve import retain_clear_fragments
     carve_oracle=factory(board,deadline=deadline,compact=True,ignored_copper=blockers)
-    retained=[];removed_length=0
+    retained=[];fragment_sources={};removed_length=0
     for uid in sorted(blockers):
         original=before[uid]
         fragments=retain_clear_fragments(original,carve_oracle)
@@ -382,8 +513,10 @@ def negotiate_routes(board,nets,protected,deadline,*,router_factory=None,attempt
         board.Delete(original)
         for fragment in fragments:
             board.Add(fragment);carve_oracle.index(fragment);retained.append(fragment)
+            fragment_sources[fragment.m_Uuid.AsString()]=uid
     return {'connected':count,'removed':sorted(blockers),'added':relaxed.added,
             'retained_fragments':[t.m_Uuid.AsString() for t in retained],
+            'fragment_sources':fragment_sources,
             'displaced_length_mm':removed_length/1e6,
             'retained_length_mm':sum(t.GetLength() for t in retained)/1e6,
             'diagnostic':relaxed.graph_diagnostic}

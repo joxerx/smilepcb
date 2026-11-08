@@ -1,14 +1,15 @@
 [build-system]
 requires = ["setuptools>=77.0.3"]
-build-backend = "setuptools.build_meta"
+build-backend = "smilepcb_build_backend"
+backend-path = ["."]
 
 [project]
 name = "smilepcb"
-version = "0.2.0rc1"
+version = "0.3.0"
 description = "Experimental keyboard PCB automation with KiCad and QMK"
 readme = "README.md"
-license = "MIT AND CERN-OHL-P-2.0"
-license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "smilepcb/data/keyboard/LICENSE"]
+license = "MIT AND CERN-OHL-P-2.0 AND CC-BY-SA-4.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "smilepcb/data/keyboard/LICENSE", "smilepcb/stm32/inputs/st40-grid48/SOURCES.md"]
 requires-python = ">=3.11"
 dependencies = ["sexpdata==1.0.2", "mcp==1.30.0"]
 
@@ -30,6 +31,7 @@ include = ["smilepcb*"]
 
 [tool.setuptools.package-data]
 smilepcb = ["encoder_fixture.json", "data/keyboard/*"]
+"smilepcb.stm32" = ["*.json", "inputs/*/*.json", "inputs/*/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

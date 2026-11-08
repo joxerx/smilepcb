@@ -151,3 +151,173 @@ def restore_fixed_vias(text,manifest):
         if str(node[0])=='padstack' and str(node[1]) in manifest['via_padstacks']:
             library[i]=_read(manifest['via_padstacks'][str(node[1])])
     return _write(tree)
+
+
+def fixed_trace_exchange(text,*,indices):
+    """Enclose reported fixed round strokes without changing any via profile.
+
+    The router's mitered tiles can overestimate a legal native round cap.
+    Full conservative capsules retain its occupied area; a contained fixed
+    spine retains contacts. Native exact roundtrip and final DRC still gate it.
+    """
+    selected=set(indices);tree=_read(text);wiring=_child(tree,'wiring')
+    if wiring is None or any(type(i) is not int or not 1<=i<len(wiring) for i in selected):
+        raise ValueError('Invalid fixed trace selection')
+    for i in selected:
+        row=wiring[i]
+        if (str(row[0])!='wire' or _child(row,'path') is None or
+            _child(row,'type') not in ([sx.Symbol('type'),sx.Symbol('fix')],[sx.Symbol('type'),sx.Symbol('protect')])):
+            raise ValueError('Only fixed traces have a proven conservative exchange')
+    return fixed_copper_exchange(text,indices=selected)
+
+
+def diagnosed_fixed_traces(text,report):
+    """Only trace strokes use the trace adapter; via/pin errors need their own proof."""
+    selected=diagnosed_fixed_objects(text,report);wiring=_child(_read(text),'wiring')
+    return {i for i in selected if str(wiring[i][0])=='wire' and _child(wiring[i],'path') is not None}
+
+
+def _fixed_pin_pose(pin,place):
+    """Decode a physical alias using DSN placement, including pin rotation scopes."""
+    body=[q for q in pin[2:] if not isinstance(q,list)]
+    modifiers=[q for q in pin[2:] if isinstance(q,list)]
+    if len(body)!=3 or any(len(q)!=2 or str(q[0])!='rotate' for q in modifiers):
+        raise ValueError('Unsupported DSN pin pose')
+    alias,x,y=body
+    values=(x,y,place[2],place[3],place[5],*(q[1] for q in modifiers))
+    if any(type(q) not in (int,float) or not math.isfinite(q) for q in values):raise ValueError('Invalid DSN pin coordinates')
+    face=str(place[4])
+    if face not in ('front','back'):raise ValueError('Unsupported DSN placement side')
+    if face=='back':x=-x
+    angle=math.radians(place[5]);c,s=math.cos(angle),math.sin(angle)
+    px,py=place[2]+c*x-s*y,place[3]+s*x+c*y
+    return str(alias),(px*1000,-py*1000)
+
+
+def _round_pin_profile(stack,radius):
+    """Match the source physical circular profile, not a neighboring SMD alias."""
+    shapes=[q[1] for q in stack[2:] if str(q[0])=='shape']
+    if len(shapes)!=2 or {str(q[1]) for q in shapes}!={'F.Cu','B.Cu'}:return False
+    for shape in shapes:
+        if str(shape[0])=='circle':
+            if len(shape) not in (3,5) or abs(shape[2]/2-radius)>.2 or len(shape)==5 and math.hypot(*shape[3:])>.2:return False
+        elif str(shape[0])=='polygon':
+            values=shape[3:]
+            if len(values)<6 or len(values)%2:return False
+            distances=[math.hypot(x,y) for x,y in zip(values[::2],values[1::2])]
+            if min(distances)<radius-.2 or max(distances)>(radius+.02)/math.cos(math.pi/64)+.2:return False
+        else:return False
+    return True
+
+
+def fixed_round_pin_exchange(text,report,native_pads,*,completed_nets):
+    """Represent reported, retained PTH pads without a coarse drill tile.
+
+    The caller supplies native circular plated pads and natively completed
+    nets that the router will not reroute. Full enclosing copper remains a
+    same-net conduction area; a contained pin retains the logical endpoint.
+    Native pads, via profiles and manufacturing rules never change. Strict
+    router preflight and exact native roundtrip are still mandatory.
+    """
+    if report.get('coordinateUnits')!='mm':raise ValueError('Unsupported report units')
+    if not isinstance(completed_nets,(set,frozenset)) or any(type(n) is not str for n in completed_nets):
+        raise ValueError('Expected verified completed net names')
+    receipt={'converted_pads':[],'enclosure_guard_um':.1,'connector_um':1}
+    selected={}
+    for violation in report['violations']:
+        if violation['severity']!='error':continue
+        items=violation['items'];vias=[q for q in items if q['description'].startswith('Via [') and q['description'].endswith(']')]
+        for item in items:
+            label=item['description']
+            if not label.startswith('Pin [') or not label.endswith(']'):continue
+            net=label[5:-1]
+            if net not in completed_nets or not any(q['description'][5:-1]==net for q in vias):continue
+            target=(item['pos']['x']*1000000,-item['pos']['y']*1000000)
+            matches=[q for q in native_pads if q['net']==net and math.dist(q['position'],target)<8000]
+            if len(matches)>1:raise ValueError('Ambiguous reported native pin')
+            if not matches:continue
+            pad=matches[0];size=pad['size'];drill=pad['drill']
+            if len(size)!=2 or len(drill)!=2 or not 0<drill[0]==drill[1]<size[0]==size[1]:continue
+            if any(type(n) is not int for n in (*size,*drill,*pad['position'])):raise ValueError('Expected native integer pin geometry')
+            selected[pad['uuid']]=pad
+    if not selected:return text,receipt
+    if len(selected)>128:raise ValueError('Fixed pin exchange selection is too large')
+    tree=_read(text);lib=_child(tree,'library');placement=_child(tree,'placement');wiring=_child(tree,'wiring')
+    if _child(tree,'unit')!=[sx.Symbol('unit'),sx.Symbol('um')] or any(q is None for q in (lib,placement,wiring)):
+        raise ValueError('Incomplete micron DSN')
+    if any(str(q[1]).startswith('SmilePCBFixedPin') for q in lib[1:]):raise ValueError('Fixed pin exchange already applied')
+    for index,pad in enumerate(sorted(selected.values(),key=lambda q:(q['ref'],q['number'],*q['position']))):
+        places=[(component,place) for component in placement[1:] if str(component[0])=='component'
+                for place in component[2:] if isinstance(place,list) and str(place[0])=='place' and str(place[1])==pad['ref']]
+        if len(places)!=1:raise ValueError('Fixed pin component is ambiguous or absent')
+        component,place=places[0];images=[q for q in lib[1:] if str(q[0])=='image' and str(q[1])==str(component[1])]
+        if len(images)!=1:raise ValueError('Fixed pin image is ambiguous or absent')
+        image=deepcopy(images[0]);image[1]='SmilePCBFixedPinImage'+str(index)
+        candidates=[];network=_child(tree,'network')
+        if network is None:raise ValueError('Fixed pin requires explicit network bindings')
+        nets=[q for q in network[1:] if str(q[0])=='net' and str(q[1])==pad['net']]
+        if len(nets)!=1 or _child(nets[0],'pins') is None:raise ValueError('Fixed pin native net is absent')
+        bindings={str(q) for q in _child(nets[0],'pins')[1:]}
+        for candidate in image[2:]:
+            if str(candidate[0])!='pin':continue
+            alias,point=_fixed_pin_pose(candidate,place)
+            if pad['ref']+'-'+alias not in bindings or math.dist(point,pad['position'])>200:continue
+            stacks=[q for q in lib[1:] if str(q[0])=='padstack' and str(q[1])==str(candidate[1])]
+            if len(stacks)!=1:raise ValueError('Fixed pin profile is ambiguous or absent')
+            if _round_pin_profile(stacks[0],pad['size'][0]/2000):candidates.append((candidate,stacks[0]))
+        if len(candidates)!=1:raise ValueError('Physical fixed pin alias/geometry is ambiguous or absent')
+        pin,original=candidates[0];stack=deepcopy(original)
+        stack[1]='SmilePCBFixedPinConnector'+str(index);pin[1]=stack[1];layers=[]
+        for shape in stack[2:]:
+            if str(shape[0])=='shape':
+                layers.append(str(shape[1][1]));shape[1]=[sx.Symbol('circle'),shape[1][1],1]
+        if len(layers)!=2 or set(layers)!={'F.Cu','B.Cu'}:raise ValueError('Fixed pin must span exactly the two copper layers')
+        lib.extend([stack,image]);placement.append([sx.Symbol('component'),image[1],deepcopy(place)]);component.remove(place)
+        if len(component)==2:placement.remove(component)
+        x,y=pad['position'];point=(x/1000,-y/1000);radius=pad['size'][0]/2000+receipt['enclosure_guard_um']
+        for layer in layers:
+            wiring.append([sx.Symbol('wire'),[sx.Symbol('polygon'),sx.Symbol(layer),0,*_capsule(point,point,radius)],
+                           [sx.Symbol('net'),pad['net']],[sx.Symbol('type'),sx.Symbol('fix')]])
+        receipt['converted_pads'].append({k:pad[k] for k in ('ref','number','net','uuid')})
+    return _write(tree),receipt
+
+
+def verify_fixed_input_discrepancies(report,native_snapshot,*,protected_ids,completed_nets,hole_clearance_nm):
+    """Audit surrogate-only source via pairs; not a manufacturing certificate.
+
+    The caller must first prove native ERC/physical DRC/parity clean, then an
+    exact no-routing roundtrip, and require native final acceptance. Only
+    existing fixed through-vias of one natively completed net qualify. Their
+    real circular drill gap must satisfy the native hole-clearance floor.
+    No new or unrecognized router violation receives an exception.
+    """
+    if report.get('coordinateUnits')!='mm':raise ValueError('Unsupported router discrepancy units')
+    if type(hole_clearance_nm) is not int or hole_clearance_nm<=0:raise ValueError('Expected actual native hole-clearance floor')
+    pairs={};count=0
+    for violation in report['violations']:
+        if violation['severity']!='error':continue
+        if violation.get('type')!='holeClearance' or len(violation['items'])!=2:
+            raise ValueError('Unrecognized router input discrepancy')
+        selected=[]
+        for item in violation['items']:
+            description=item['description']
+            if not description.startswith('Via [') or not description.endswith(']'):raise ValueError('Only fixed via/via discrepancies qualify')
+            net=description[5:-1]
+            if net not in completed_nets:raise ValueError('Router discrepancy is on an unfinished native net')
+            point=(item['pos']['x']*1000000,-item['pos']['y']*1000000)
+            matches=[(uid,q) for uid,q in native_snapshot['tracks'].items() if uid in protected_ids
+                     and q['class']=='PCB_VIA' and q['net']==net and math.dist(q['start'],point)<8000]
+            if len(matches)!=1:raise ValueError('Router discrepancy does not identify one fixed native via')
+            uid,via=matches[0]
+            if (set((via['top'],via['bottom']))!={0,2} or via['start']!=via['end'] or
+                    type(via['drill']) is not int or type(via['width']) is not int or not 0<via['drill']<via['width']):
+                raise ValueError('Unsupported native via geometry in router discrepancy')
+            selected.append((uid,via))
+        (a,first),(b,second)=selected
+        if a==b or first['net']!=second['net']:raise ValueError('Router discrepancy is not one same-net physical via pair')
+        gap=math.dist(first['start'],second['start'])-(first['drill']+second['drill'])/2
+        if gap<hole_clearance_nm:raise ValueError('Source via holes violate the native manufacturing clearance')
+        key=tuple(sorted((a,b)))
+        pairs[key]={'ids':list(key),'net':first['net'],'hole_gap_nm':gap};count+=1
+    return {'accepted':True,'violations':count,'pairs':[pairs[k] for k in sorted(pairs)],
+            'native_physical_preflight_and_final_checks_required':True}

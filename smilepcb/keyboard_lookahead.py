@@ -20,7 +20,7 @@ def provisional_step(before,after,*,seen,depth,max_depth=3,gap_ceiling=None):
     return {'allowed':allowed,'complete':allowed and not after,'protect_healed':set(before)-set(after) if allowed else set()}
 
 
-def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None,routing_quality='legacy',elastic=False,attempt_counts=None):
+def run_lookahead(project,output,previous,protected,deadline,announce,*,native_call=None,checks_call=None,routing_quality='legacy',generation_profile='native',elastic=False,attempt_counts=None):
     """Promote only checked zero; optionally explore bounded temporary gaps.
 
     Conservative mode retains three non-worsening hops. Elastic mode permits
@@ -28,7 +28,7 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
     selects return recovery when the current provisional state needs it.
     The last 180 seconds of the caller's existing budget are reserved for
     final cleanup/acceptance. Every saved intermediate stays under one newly
-    allocated disposable root; routing_transaction promotes only the board.
+    allocated disposable root; routing_transaction promotes board and receipts.
     """
     import json
     import secrets
@@ -40,6 +40,7 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
     from .lab_tools import worker,rule_checks
     from .service import encode
     from .routing_quality import quality_profile
+    from .keyboard_routing.generated_provenance import tracked_worker,MARKER as PROVENANCE
     routing_quality=quality_profile(routing_quality).name
     max_depth,max_initial=lookahead_limits(elastic)
     project=Path(project).resolve();output=Path(output).resolve()
@@ -55,11 +56,11 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
         if value<=1:raise TimeoutError('Lookahead exhausted the existing build budget')
         return min(90,value)
     def invoke(operation,tag=None,**request):
-        request.update(routing_quality=routing_quality,elastic=elastic,gap_ceiling=ceiling)
+        request.update(routing_quality=routing_quality,generation_profile=generation_profile,elastic=elastic,gap_ceiling=ceiling)
         budget=remaining()
         if native_call is not None:return native_call(operation,tag=tag,**request)
         bridge=Path(__file__).with_name('keyboard_lookahead_native.py') if operation in ('provisional','final_frame') else BRIDGE
-        data=worker(bridge,dict(operation=operation,**{key:str(value) if isinstance(value,Path) else value for key,value in request.items()},budget_s=min(82,budget-1)),root/(tag+'.log'),timeout_s=budget)
+        data=tracked_worker(worker,bridge,dict(operation=operation,**{key:str(value) if isinstance(value,Path) else value for key,value in request.items()},budget_s=min(82,budget-1)),root/(tag+'.log'),timeout_s=budget)
         (root/(tag+'.json')).write_text(encode(data));return data
     current=project;seen={gap_signature(missing)};healed=set();history=[];final=None
     attempt_counts={} if attempt_counts is None else attempt_counts
@@ -100,7 +101,10 @@ def run_lookahead(project,output,previous,protected,deadline,announce,*,native_c
              set(drc['types'])-{'track_dangling','via_dangling'}))):return previous
     remaining()
     def checked(candidate):
-        shutil.copyfile(final/(NAME+'.kicad_pcb'),candidate/(NAME+'.kicad_pcb'))
+        for name in ('.smilepcb-field.json',PROVENANCE,NAME+'.kicad_pcb'):
+            source=final/name
+            if source.exists():shutil.copyfile(source,candidate/name)
+            elif (candidate/name).exists():raise ValueError('Lookahead candidate lost integrity receipt')
         return independent
     transaction=routing_transaction(project,root/'promotion',checked,previous,deadline=trial_deadline)
     (root/'promotion.json').write_text(encode(transaction))

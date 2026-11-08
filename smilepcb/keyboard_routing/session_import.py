@@ -1,4 +1,5 @@
 """Replace editable native copper while retaining exact fixed objects."""
+import time
 from smilepcb.native_worker import p,snapshot
 from smilepcb.routing_policy import fixed_copper_ids
 from smilepcb.routing_session import session_via_contacts,require_via_inventory
@@ -6,7 +7,21 @@ from smilepcb.routing_copper import routing_delta
 
 
 def apply_open_session(board,session,protected_ids):
-    """Mutate only this in-memory candidate; the caller owns validation/save."""
+    """Mutate a disposable candidate; discard it after any rejected import.
+
+    Every existing physical pad group must survive, even on an unfinished net.
+    The caller saves only a successful result. Plane contacts are recomputed
+    on actual filled polygons before and after changing the copper.
+    """
+    from .completion import pad_partitions
+    from .handoff import preserves_contacts
+    deadline=time.monotonic()+60
+    def contacts():
+        if time.monotonic()>=deadline:raise TimeoutError('Session contact proof deadline exhausted')
+        if any(not z.GetIsRuleArea() for z in board.Zones()):
+            if not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Session contact proof cannot refill planes')
+        return [sorted(g) for g in pad_partitions(board,deadline)]
+    old_contacts=contacts()
     before=snapshot(board);protected=fixed_copper_ids(board,protected_ids)
     fixed={uid:before['tracks'][uid] for uid in protected}
     expected=session_via_contacts(session.read_text())
@@ -38,7 +53,9 @@ def apply_open_session(board,session,protected_ids):
     board.BuildConnectivity();after=snapshot(board)
     if after['footprints']!=before['footprints'] or any(after['tracks'].get(uid)!=v for uid,v in fixed.items()):
         raise ValueError('Global routing changed fixed copper or components')
-    return {'protected_tracks':len(fixed),'protected_ids':sorted(protected),
+    if not preserves_contacts(old_contacts,contacts()):
+        raise ValueError('Global routing split an existing native pad group')
+    return {'native_pad_contacts_preserved':True,'protected_tracks':len(fixed),'protected_ids':sorted(protected),
             'replaced_editable_objects':len(before['tracks'])-len(fixed),
             'fixed_arcs_or_dots':len(fixed)-len(linear),'returned_copper':len(returned),
             'added_objects':len(delta),'final_copper':len(after['tracks']),

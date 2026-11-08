@@ -4,18 +4,24 @@ from pathlib import Path
 import pytest
 import sexpdata
 
+from smilepcb.usb_policy import configured_usb_max_length_nm
 ROOT=Path(__file__).resolve().parents[1]
 
-def test_host_completion_does_not_retry_the_same_net_after_recording_its_attempt(tmp_path):
-    source=ROOT/'recipes/stm32/complete.py'
+@pytest.mark.parametrize('profile',['native','dsn-process-v2'])
+def test_host_completion_does_not_retry_the_same_net_after_recording_its_attempt(tmp_path,profile):
+    source=ROOT/'smilepcb/stm32/complete.py'
     tree=ast.parse(source.read_text());call=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='call')
+    requests=[]
+    (tmp_path/'keyboard.kicad_pcb').write_text('(kicad_pcb)')
     def worker(_bridge,request,_log,**kwargs):
+        requests.append(request)
         counts=dict(request.get('attempt_counts',{}));net=min(('hard','other'),key=lambda n:(counts.get(n,0),n));counts[net]=counts.get(net,0)+1
-        return {'accepted':False,'selected':net,'connections':0,'pad_group_gaps':2,'graph':{'attempt_counts':counts}}
-    env={'worker':worker,'BRIDGE':Path('native'),'board':tmp_path/'keyboard.kicad_pcb','quality':'turns','counts':{},'history':[],'out':tmp_path,'deadline':time.perf_counter()+120,'time':time,'json':json}
+        return {'generation_profile':request['generation_profile'],'accepted':False,'selected':net,'connections':0,'pad_group_gaps':2,'graph':{'attempt_counts':counts}}
+    env={'configured_usb_max_length_nm':configured_usb_max_length_nm,'cfg':{},'worker':worker,'BRIDGE':Path('native'),'board':tmp_path/'keyboard.kicad_pcb','quality':'turns','profile':profile,'counts':{},'history':[],'out':tmp_path,'deadline':time.perf_counter()+120,'time':time,'json':json}
     exec(compile(ast.Module(body=[call],type_ignores=[]),str(source),'exec'),env)
     selected=[env['call']('complete',tag='trial-'+str(i))['selected'] for i in range(2)]
     assert selected==['hard','other']
+    assert all(request['generation_profile']==profile for request in requests)
 
 @pytest.fixture(scope='module')
 def native_report(tmp_path_factory):

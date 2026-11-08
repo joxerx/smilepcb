@@ -26,5 +26,9 @@ report={'native_gap_retained':probe('native'),'dsn_guard_band_rejected':not prob
         'dsn_clear_path_retained':probe('dsn-safe-v1',clearance=.275),
         'strict_native_hole_rule':not probe('native',gap=.35,clearance=.3),
         'strict_rule_across_buckets':not probe('native',gap=3.5,center=5,diameter=.2,clearance=3.125),
-        'same_net_plated_join':probe('dsn-safe-v1',plated=True)}
+        'same_net_plated_join':probe('dsn-safe-v1',plated=True),
+        'v2_dsn_guard_band_rejected':not probe('dsn-process-v2'),
+        'v2_dsn_clear_path_retained':probe('dsn-process-v2',clearance=.275),
+        'v2_strict_native_hole_rule':not probe('dsn-process-v2',gap=.35,clearance=.3),
+        'v2_same_net_plated_join':probe('dsn-process-v2',plated=True)}
 Path(sys.argv[1]).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))

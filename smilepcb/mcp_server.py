@@ -9,11 +9,27 @@ from .mcp_jobs import JobRunner
 
 def build_server(workspace):
     workspace = Path(workspace).resolve(strict=True)
-    server = FastMCP("SmilePCB Lab", instructions="Synthetic lab projects only. Plan and preview before applying. "
+    server = FastMCP("SmilePCB Lab", instructions="Synthetic transaction projects and supported fresh STM32 KLE generation. Plan and preview before applying existing-project changes. "
                      "Encoder planning prepares and routes an isolated candidate with bounded offline tools. "
                      "Apply uses that exact candidate. No project discovery, downloads or hardware flashing.")
 
     jobs = JobRunner(workspace)
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False})
+    async def generate_keyboard(kle: str,config: str,tools: str,output: str,controller_source: str,
+                                process_profile: str='fr4-2l-1oz-0p5-0p2',routing_quality: str='turns',
+                                completion_budget_s: int=3600,placement_attempts: int=8,placement_budget_s: int=220,usb_max_length_nm: int | None=20_000_000,
+                                coherent_via_banks: bool=False,unified_controller_plan: bool=False,component_corridors: bool=False) -> dict:
+        """Build a new supported STM32 keyboard from explicit workspace KLE/config.
+
+        The pinned public donor must already be provisioned. Output must be new;
+        one heavy job runs at a time. Cancellation stops the owned native job.
+        Complete acceptance requires native checks, connectivity and matching QMK.
+        """
+        return await jobs.generate(dict(kle=kle,config=config,tools=tools,output=output,
+            controller_source=controller_source,process_profile=process_profile,routing_quality=routing_quality,
+            completion_budget_s=completion_budget_s,placement_attempts=placement_attempts,placement_budget_s=placement_budget_s,
+            usb_max_length_nm=usb_max_length_nm,coherent_via_banks=coherent_via_banks,unified_controller_plan=unified_controller_plan,component_corridors=component_corridors))
 
     @server.tool(annotations={"readOnlyHint": True})
     async def inspect(project: str) -> dict:

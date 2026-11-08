@@ -63,13 +63,19 @@ def compile_qmk(project, output, tools):
     ini.write_text('[user]\nqmk_home = '+str(runtime)+'\noverlay_dir = '+str(output/'disabled-userspace')+'\n')
     command = [str(tools['qmk_bin']),'--config-file',str(ini),'compile','--clean','-j','2',
                '-kb','smilepcb/generated','-km','default']
-    env = os.environ.copy()
+    from .process_ownership import detached_environment,register_detached_group,unregister_detached_group
+    env = detached_environment(os.environ)
     env.update(PATH=str(bindir)+':'+str(Path(tools['qmk_bin']).parent)+':'+str(Path(tools['arm_gcc']).parent)+':'+env.get('PATH',''),
                QMK_HOME=str(runtime),SKIP_GIT='yes',NOT_REPO='yes',PYTHONDONTWRITEBYTECODE='1',
                MAKEFLAGS='-j2',CMAKE_BUILD_PARALLEL_LEVEL='2')
     started = time.perf_counter()
     with (output/'build.log').open('w') as log:
         child = subprocess.Popen(command,cwd=runtime,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+        try:owned_identity=register_detached_group(child.pid)
+        except BaseException:
+            try:os.killpg(child.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            child.wait();raise
         timed_out = threading.Event()
         def terminate():
             timed_out.set()
@@ -87,6 +93,7 @@ def compile_qmk(project, output, tools):
             child.wait(); raise
         finally:
             timer.cancel(); killer.cancel()
+            unregister_detached_group(child.pid,owned_identity)
     if child.returncode or timed_out.is_set():
         raise RuntimeError('QMK clean build failed; see '+str(output/'build.log'))
     files = {}

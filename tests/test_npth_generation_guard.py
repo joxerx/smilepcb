@@ -11,7 +11,7 @@ def test_new_copper_fits_native_and_exchange_hole_clearances(tmp_path):
  run=subprocess.run([interpreter,str(Path(__file__).with_name('native_npth_guard_probe.py')),str(out)],cwd=root,
                     env={**os.environ,'PYTHONPATH':str(root)},capture_output=True,text=True,timeout=30)
  assert run.returncode==0,run.stdout+'\n'+run.stderr
- assert json.loads(out.read_text())==dict.fromkeys(('native_gap_retained','dsn_guard_band_rejected','dsn_clear_path_retained','strict_native_hole_rule','strict_rule_across_buckets','same_net_plated_join'),True)
+ assert json.loads(out.read_text())==dict.fromkeys(('native_gap_retained','dsn_guard_band_rejected','dsn_clear_path_retained','strict_native_hole_rule','strict_rule_across_buckets','same_net_plated_join','v2_dsn_guard_band_rejected','v2_dsn_clear_path_retained','v2_strict_native_hole_rule','v2_same_net_plated_join'),True)
 
 
 @pytest.mark.parametrize('diameter',[200000,1750000,4100000,8000000])

@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def model():
-    fixture=ROOT/'recipes/stm32/inputs/compact68'
+    fixture=ROOT/'smilepcb/stm32/inputs/compact68'
     return design(parse_layout((fixture/'layout.kle.json').read_text(),json.loads((fixture/'keyboard.json').read_text())),controller_origin_mm=(0,0))
 
 

@@ -1,6 +1,7 @@
 """Small command-line entry point for the shared lab service."""
 import argparse
 import json
+from .usb_policy import parse_usb_max_length_mm
 from pathlib import Path
 
 
@@ -22,14 +23,25 @@ def main():
     build = commands.add_parser('build', help='Build a new STM32 keyboard from KLE')
     for name in ('kle','config','tools','output'):
         build.add_argument('--'+name, required=True, type=Path)
+    build.add_argument('--controller-source',required=True,type=Path)
+    build.add_argument('--component-corridors',action='store_true',help='Experimental controller-local corridors; requires --unified-controller-plan')
+    build.add_argument('--unified-controller-plan',action='store_true',help='Experimental joint MCU source batch and required local closure')
+    build.add_argument('--coherent-via-banks',action='store_true',help='Experimental source preference; does not assert final coherence')
+    build.add_argument('--process-profile',default='fr4-2l-1oz-0p5-0p2',choices=('legacy-0p6-0p3','fr4-2l-1oz-0p5-0p2'))
+    build.add_argument('--routing-quality',default='turns',choices=('legacy','turns'))
+    build.add_argument('--completion-budget-s',type=int,default=3600)
+    build.add_argument('--placement-attempts',type=int,default=8)
+    build.add_argument('--placement-budget-s',type=int,default=220,help='Staged placement seconds per attempt (220..1200)')
+    build.add_argument('--usb-max-length-mm',type=parse_usb_max_length_mm,default=...,dest='usb_max_length_nm',help='Absolute USB geometry cap in mm (default 20); none removes only this cap, not DRC/skew checks')
     args = parser.parse_args()
     if args.command == 'build':
         try:
-            from .keyboard_tools import load_tools, configure_kicad
-            tools = load_tools(args.tools)
-            configure_kicad(tools, args.output)
-            from .keyboard_build import build_keyboard
-            result = build_keyboard(args.kle,args.config,args.output,tools)
+            from .stm32.generate import generate_keyboard
+            result = generate_keyboard(args.kle,args.config,args.tools,args.output,
+                controller_source=args.controller_source,process_profile=args.process_profile,
+                usb_max_length_nm=args.usb_max_length_nm,component_corridors=args.component_corridors,
+                routing_quality=args.routing_quality,completion_budget_s=args.completion_budget_s,
+                placement_attempts=args.placement_attempts,placement_budget_s=args.placement_budget_s,coherent_via_banks=args.coherent_via_banks,unified_controller_plan=args.unified_controller_plan)
         except (ValueError,OSError,RuntimeError) as error:
             parser.exit(1,str(error)+'\n')
         print(json.dumps(result,indent=2))

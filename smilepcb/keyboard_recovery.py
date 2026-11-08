@@ -76,7 +76,10 @@ def controller_interface_ids(source_project):
             ids.extend(values)
     keys=_read_interface_proof(folder/'key-data-access.json')
     if keys is not _ABSENT_PROOF:ids.extend(key_via_ids(keys))
-    return sorted(set(ids))
+    from .keyboard_routing.field_contract import load,retired_ids
+    receipt=load(source_project)
+    retired=retired_ids(receipt) if receipt is not None else set()
+    return sorted(set(ids)-retired)
 
 
 def pending_interface_ids(board_file,owned_ids,pending_nets):
@@ -120,7 +123,16 @@ def plane_pairs(independent,planes):
     return result
 
 
-def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=(),routing_quality='legacy',attempt_counts=None):
+def joint_generated_ids(board,supplied=()):
+    """Use current positive provenance; filled-plane recovery is separate."""
+    from .keyboard_routing.generated_provenance import MARKER,generated_ids,has_zones
+    board=Path(board)
+    if has_zones(board):return None
+    marker=board.parent/MARKER
+    return generated_ids(board) if marker.exists() or marker.is_symlink() else sorted(set(supplied))
+
+
+def recover_generated(project,output,independent,protected,call,announce,deadline,*,port_ids=(),routing_quality='legacy',generation_profile='native',attempt_counts=None,generated_ids=()):
     """Keep improving checked transactions; retain all rejected diagnostics."""
     from .service import encode
     from .keyboard_build import routing_transaction,NAME
@@ -134,8 +146,14 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         tag='completion-'+str(index);index+=1;announce('geometric completion '+str(index)+' / '+strategy)
         folder=output/tag
         def repair(candidate):
-            result=call('complete',tag=tag,board_override=candidate/(NAME+'.kicad_pcb'),strategy=strategy,
-                        protected_ids=protected,**kwargs)
+            operation='joint_repair' if strategy=='joint_repair' else 'complete'
+            options={'strategy':strategy}
+            if operation=='joint_repair':
+                remaining=deadline-time.perf_counter()
+                if remaining<95:raise TimeoutError('Insufficient build budget for another bounded recovery')
+                options={'budget_s':min(150,remaining-13)}
+            result=call(operation,tag=tag,board_override=candidate/(NAME+'.kicad_pcb'),
+                        protected_ids=protected,**options,**kwargs)
             repair.result=result
             if result['accepted']:return {**current,'pad_group_gaps':result['pad_group_gaps'],'pad_groups_missing':result['pad_groups_missing']}
             return current
@@ -179,9 +197,14 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         # next. Retry against the newly verified board, never a stale trial.
         # Strictly falling gap counts and the existing deadline bound retries.
         if current['pad_group_gaps']>=before:break
+    if set(current['pad_groups_missing'])-planes:
+        from .keyboard_routing.field_contract import load
+        if load(project) is not None:
+            owned=joint_generated_ids(Path(project)/(NAME+'.kicad_pcb'),generated_ids)
+            if owned is not None:attempt('joint_repair',generated_ids=owned)
     if current['pad_group_gaps']:
         from .keyboard_lookahead import run_lookahead
-        current=run_lookahead(project,output,current,protected,deadline,announce,routing_quality=routing_quality,attempt_counts=attempt_counts)
+        current=run_lookahead(project,output,current,protected,deadline,announce,routing_quality=routing_quality,generation_profile=generation_profile,attempt_counts=attempt_counts)
     if not current['pad_group_gaps']:return current
     # A batch may sacrifice one old signal after joining several returns.
     # Retry native island pairs separately, retaining only checked progress;
@@ -227,5 +250,5 @@ def recover_generated(project,output,independent,protected,call,announce,deadlin
         # Later shifts/detours change the state that the first conservative
         # lookahead saw. Explore that new topology within the same deadline.
         current=run_lookahead(project,output,current,protected,deadline,announce,
-                              routing_quality=routing_quality,elastic=True,attempt_counts=attempt_counts)
+                              routing_quality=routing_quality,generation_profile=generation_profile,elastic=True,attempt_counts=attempt_counts)
     return current

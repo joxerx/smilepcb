@@ -15,8 +15,8 @@ NAME = 'SmilePCB transfer 3x4'
 JAR_SHA256 = 'f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7'
 
 def worker(script, request, log, *, timeout_s=90):
-    if type(timeout_s) not in (int,float) or not 0<timeout_s<=90:
-        raise ValueError('Native worker budget must be positive and at most 90 seconds')
+    if type(timeout_s) not in (int,float) or not 0<timeout_s<=1220:
+        raise ValueError('Native worker budget must be positive and at most 1220 seconds')
     try:
         result = subprocess.run([KICAD_PYTHON, '-X', 'faulthandler', str(script)], input=json.dumps(request), text=True,
                                 capture_output=True, env=environment(), timeout=timeout_s)

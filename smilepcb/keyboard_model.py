@@ -5,6 +5,7 @@ import math
 from . import schematic as s
 from .circuit import part
 from .keyboard_placement import controller_origin,rgb_chain
+from .led_orientation import chain_rotations,data_offsets_nm
 
 NAME = 'keyboard'
 SW_SYMBOL = 'KeyboardParts:MX_HS'
@@ -100,6 +101,11 @@ def design(layout, *, controller_origin_mm=None):
         driver=next(p for p in parts if p['ref']=='R_RGB')
         source=[origin[i]+driver['pcb'][i] for i in range(2)]
         layout['rgb_order'],rgb_routing=rgb_chain(layout,source)
+    led_rotations={}
+    if layout['rgb']:
+        positions={key['id']:(round(key['center_mm'][0]*1000000),round((key['center_mm'][1]+5.08)*1000000)) for key in layout['keys']}
+        led_rotations=chain_rotations(layout['rgb_order'],positions,data_offsets_nm(),
+            side='B.Cu',lead_nm=tuple(round(value*1000000) for value in source))
     led_index = {key: index for index, key in enumerate(layout['rgb_order'])}
     for key in layout['keys']:
         i = key['id']; r,c = key['matrix']; x,y = key['center_mm']; width,height = key['size_u']
@@ -116,7 +122,7 @@ def design(layout, *, controller_origin_mm=None):
             add('LED'+str(i),LED_SYMBOL,'KeyboardParts:MINI_E',
                 {'1':'+5V_RGB','2':'RGB_'+str(index+1) if index<count-1 else 'NC_RGB_END',
                  '3':'RGB_'+str(index),'4':'GND'},(x,y+5.08),'SK6812MINI-E Rev02',
-                side='B.Cu',rotation=180 if r%2==0 else 0,no_connect=['2'] if index==count-1 else None,region='rgb')
+                side='B.Cu',rotation=led_rotations[i],no_connect=['2'] if index==count-1 else None,region='rgb')
             add('C_LED'+str(i),'Device:C','Capacitor_SMD:C_0603_1608Metric',
                 {'1':'+5V_RGB','2':'GND'},(x+5.8,y+5.08),'100nF',side='B.Cu',region='rgb')
     qmk = {'keyboard_name':layout['name'],'manufacturer':'SmilePCB','maintainer':'joxerx',

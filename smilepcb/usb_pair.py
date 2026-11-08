@@ -1,17 +1,30 @@
 """Bounded 45-degree skew tuning on explicitly owned new pair segments."""
 import math
+import time
 
 from .native_worker import p
 from .routing_style import Clearance, add_path, filled_zones, vec, xy
 
 
-def balance_pair(board, nets, *, editable_ids):
-    """Keep the existing <20 mm / <0.5 mm recipe; aim for <0.25 mm on repair.
+def balance_pair(board, nets, *, editable_ids, clear_segment=None, deadline=None, max_length_nm=...):
+    """Keep default legacy length / <0.5mm skew; aim for <0.25mm on repair.
 
     This is geometric matching, not an impedance or signal-integrity proof.
     No source segment or interior copper contact may be lost. The caller must
     still run native ERC/DRC and independent saved-board connectivity checks.
+
+    A caller may supply its full creation-policy segment checker; omitted means
+    the existing legacy Clearance policy. Deadline checks stop before mutation;
+    the caller retains transaction ownership if emission fails.
     """
+    from smilepcb.usb_policy import resolve_usb_max_length_nm,usb_length_allowed
+    max_length_nm=resolve_usb_max_length_nm(max_length_nm)
+    def budget():
+        if deadline is not None and time.monotonic()>=deadline:
+            raise TimeoutError('USB pair balancing deadline exhausted')
+    budget()
+    if clear_segment is not None and not callable(clear_segment):
+        raise ValueError('Pair segment checker must be callable')
     if len(nets)!=2 or len(set(nets))!=2:raise ValueError('Select two distinct pair nets')
     by_id={t.m_Uuid.AsString():t for t in board.GetTracks()}
     editable=set(editable_ids)
@@ -22,12 +35,17 @@ def balance_pair(board, nets, *, editable_ids):
             any(t.GetClass()!='PCB_TRACK' for t in selected) or len({t.GetLayer() for t in selected})!=1):
         raise ValueError('Pair must have existing single-layer segments without vias')
     lengths={net:sum(t.GetLength() for t in group) for net,group in tracks.items()}
-    if not all(0<value<20000000 for value in lengths.values()):raise ValueError('Pair exceeds the recipe length envelope')
-    report={'changed':False,'lengths_mm':{net:value/1e6 for net,value in lengths.items()},'added_ids':[],'removed_ids':[]}
+    if not all(usb_length_allowed(value,max_length_nm) for value in lengths.values()):raise ValueError('Pair exceeds the recipe length envelope')
+    report={'changed':False,'max_length_nm':max_length_nm,'lengths_mm':{net:value/1e6 for net,value in lengths.items()},'added_ids':[],'removed_ids':[]}
+    budget()
     if abs(lengths[nets[0]]-lengths[nets[1]])<500000:return report
     short=min(nets,key=lambda net:lengths[net]);long=max(lengths.values());oracle=Clearance(board)
+    accept=oracle.clear if clear_segment is None else clear_segment
+    def checked_segment(a,b,width,layer,net):
+        budget();return accept(a,b,width,layer,net)
     candidates=[]
     for t in tracks[short]:
+        budget()
         uid=t.m_Uuid.AsString()
         if uid not in editable or t.IsLocked():continue
         a,b=xy(t.GetStart()),xy(t.GetEnd());dx,dy=b[0]-a[0],b[1]-a[1]
@@ -35,6 +53,7 @@ def balance_pair(board, nets, *, editable_ids):
         u=(0 if not dx else (1 if dx>0 else -1),0 if not dy else (1 if dy>0 else -1))
         span=max(abs(dx),abs(dy));old_length=t.GetLength()
         for offset in range(125000,2000001,125000):
+            budget()
             for fraction in (.2,.35,.1):
                 inset=round(span*fraction)
                 if span-2*inset-2*offset<500000:continue
@@ -46,17 +65,18 @@ def balance_pair(board, nets, *, editable_ids):
                     q3=tuple(q4[i]-u[i]*offset+n[i]*offset for i in (0,1))
                     path=[a,q1,q2,q3,q4,b]
                     length=lengths[short]-old_length+sum(math.dist(x,y) for x,y in zip(path,path[1:]))
-                    if length<20000000 and abs(long-length)<250000:
+                    if usb_length_allowed(length,max_length_nm) and abs(long-length)<250000:
                         candidates.append((abs(long-length),uid,path,t))
     for _,uid,path,t in sorted(candidates,key=lambda row:(row[0],row[1],row[2])):
-        layer=t.GetLayer();width=t.GetWidth()
-        if not all(oracle.clear(a,b,width,layer,short) for a,b in zip(path,path[1:])):continue
+        budget();layer=t.GetLayer();width=t.GetWidth()
+        if not all(checked_segment(a,b,width,layer,short) for a,b in zip(path,path[1:])):continue
         old=t.GetEffectiveShape(layer)
         shapes=[p.SHAPE_SEGMENT(vec(a),vec(b),width) for a,b in zip(path,path[1:])]
         contacts=[item.GetEffectiveShape(layer) for item in [*board.GetTracks(),*(d for f in board.GetFootprints() for d in f.Pads())]
                   if item.m_Uuid.AsString()!=uid and item.GetNetname()==short and item.IsOnLayer(layer)]
         contacts.extend(shape for shape,net,face,_ in filled_zones(board) if net==short and face==layer)
         if any(p.SHAPE.Collide(old,shape,0) and not any(p.SHAPE.Collide(new,shape,0) for new in shapes) for shape in contacts):continue
+        budget()
         board.Remove(t)
         added=add_path(board,oracle,path,layer,short,width);board.BuildConnectivity()
         lengths[short]=sum(t.GetLength() for t in board.GetTracks() if t.GetNetname()==short)
@@ -65,13 +85,15 @@ def balance_pair(board, nets, *, editable_ids):
     raise ValueError('No clearance/contact-safe skew tuning within the bounded search')
 
 
-def try_joint_pair(board,nets,*,source_ref,target_ref,layer,deadline,track_width_nm=200000):
+def try_joint_pair(board,nets,*,source_ref,target_ref,layer,deadline,track_width_nm=200000,max_length_nm=...):
     """Try both joins together under the captured native generation margins.
 
     No geometry changes on failure. Existing source copper remains immutable;
     only a complete, mutually clear pair within the recipe length/skew limits
     is added. A previously connected pair is an idempotent no-op.
     """
+    from smilepcb.usb_policy import resolve_usb_max_length_nm,usb_length_allowed
+    max_length_nm=resolve_usb_max_length_nm(max_length_nm)
     import time
     from .keyboard_routing.pair_paths import paired_octile_paths
     from .keyboard_routing.local_router import LocalRouter
@@ -101,7 +123,7 @@ def try_joint_pair(board,nets,*,source_ref,target_ref,layer,deadline,track_width
             for paths in paired_octile_paths((a,z),ends):
                 added=[sum(math.dist(a,b) for a,b in zip(path,path[1:])) for path in paths]
                 totals=[lengths[net]+extra for net,extra in zip(nets,added)]
-                if all(0<value<20000000 for value in totals) and abs(totals[0]-totals[1])<500000:
+                if all(usb_length_allowed(value,max_length_nm) for value in totals) and abs(totals[0]-totals[1])<500000:
                     candidates.append((sum(added),sum(len(path) for path in paths),paths))
     router=LocalRouter(board,deadline=deadline,compact=True,track_width_nm=track_width_nm)
     gap=max(router.net_clearances.get(net,0) for net in nets)

@@ -43,9 +43,11 @@ def owned_board(request):
 
 def run(request):
     from smilepcb.routing_quality import using_quality_profile
-    with using_quality_profile(request.get('routing_quality','legacy')) as quality:
+    from smilepcb.keyboard_routing.generation import generation_profile
+    with generation_profile(request.get('generation_profile','native')) as creation,using_quality_profile(request.get('routing_quality','legacy')) as quality:
         result=_run(request)
         result['routing_quality']=quality.name
+        result['generation_profile']=creation.name
         return result
 
 
@@ -63,6 +65,9 @@ def _run(request):
     deadline=time.monotonic()+budget
     board=p.LoadBoard(str(path));validate(board,dict(request,board=str(path)))
     before=snapshot(board);protected=set(request.get('protected_ids',()))
+    from smilepcb.keyboard_routing.field_contract import load,verify_native
+    contract=load(path.parent)
+    if contract is not None:protected.update(verify_native(board,contract,deadline=deadline))
     if request.get('operation')=='final_frame':
         original=p.LoadBoard(str(reference));validate(original,dict(request,board=str(reference)))
         require_provisional_frame(snapshot(original),before,protected)

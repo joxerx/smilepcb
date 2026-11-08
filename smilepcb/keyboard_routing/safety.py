@@ -31,6 +31,7 @@ def require_via_land_clearance(board,deadline=None):
                 if (uid,layer) in seen:continue
                 seen.add((uid,layer))
                 if p.SHAPE.Collide(hole,shape,gap):
+                    budget()
                     raise ValueError('Via drill is too close to solder land '+ref+'/'+pin+': '+via.m_Uuid.AsString())
     return {'vias_checked':count,'drill_to_solder_land_min_mm':.1}
 

@@ -73,7 +73,9 @@ def rehome_spoke(board,via,layer,*,protected,deadline):
         return None
     stubs=[]
     for item in contacts:
-        point,_=router.endpoints(item,old);path=leg(old,point,other)
+        try:point,_=router.endpoints(item,old)
+        except TimeoutError:return None
+        path=leg(old,point,other)
         if path is None:return None
         stubs.append((other,path))
     candidates={tuple(round(a[i]+radius*(math.cos(angle*math.pi/8) if i==0 else math.sin(angle*math.pi/8))) for i in (0,1))

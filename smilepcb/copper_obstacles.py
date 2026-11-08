@@ -25,7 +25,14 @@ def copper_graphics(board):
 
 
 def own_clearance(item,layer,minimum):
-    return max(minimum,item.GetOwnClearance(layer),item.GetLocalClearance() or 0)+1000
+    # Fresh boards may have no native DRC engine. KiCad's loaded engine
+    # evaluates NPTH pads with the hole-clearance rule; preserve that same
+    # declared floor here without reducing native or local overrides.
+    hole_floor=0
+    if isinstance(item,p.PAD) and item.GetAttribute()==p.PAD_ATTRIB_NPTH:
+        board=item.GetBoard()
+        if board is not None:hole_floor=board.GetDesignSettings().m_HoleClearance
+    return max(minimum,hole_floor,item.GetOwnClearance(layer),item.GetLocalClearance() or 0)+1000
 
 
 def net_clearances(board,minimum):

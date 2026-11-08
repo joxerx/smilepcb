@@ -5,139 +5,97 @@
 
 **Keyboard layouts → KiCad PCB projects and matching QMK firmware.**
 
-SmilePCB combines reusable circuit rules, component placement, GPIO assignment,
-routing and native checks. It builds on public keyboard designs and established
-community tools rather than replacing KiCad or QMK.
+SmilePCB automates placement, GPIO assignment, two-layer routing and native
+checks for STM32F072CBT6 keyboards with a USB-C daughterboard connection,
+MX hot-swap switches and optional SK6812MINI-E per-key RGB.
 
-**0.2.0rc1 is an experimental prerelease.**
-Four fresh builds passed the complete software workflow on the tested stack:
-two each of the supplied 61-key and 68-key RGB layouts, two copper layers,
-zero native ERC/DRC findings under the
-[documented rule profile](docs/workflows/stm32.md#rule-scope), zero independent
-connectivity gaps and clean matching QMK builds.
+Version0.3.0 adds a complete installed KLE build workflow and an opt-in routing
+profile with straight row trunks, vertical/45-degree columns on the opposite
+copper face, and grouped controller approaches. See the
+[routing guide](docs/reference-style-routing.md) for the profile and limits.
 
-| Layout | Fresh trials passed | Full command time | Largest process peak RSS |
-| --- | --- | --- | --- |
-| ANSI61 + RGB | 2/2 | 20:20–20:42 | 905–913 MiB |
-| compact68 + RGB | 2/2 | 28:12–30:22 | 847–945 MiB |
+**Release qualification is being repeated before publication.** The final
+0.3.0 report will describe only the completed ANSI61 and Compact68 RGB cohort.
+The older [0.2.0rc1 report](docs/qualification/0.2.0rc1.json) qualifies its own
+runtime only. Software checks do not establish fabricated-hardware validation.
 
-Times include all internal attempts. Memory is the largest individual supervised
-process, not a simultaneous process-tree total. See the
-[exact measurements and source fingerprints](docs/qualification/0.2.0rc1.json).
-These samples qualify the supplied fixtures and runtime only. They do not
-guarantee completion, identical copper or reference-quality appearance for
-another run or layout. Incomplete runs retain diagnostics and are not accepted.
-Generated hardware has not been fabricated or tested. No speed or memory
-improvement against an unmatched baseline is claimed.
+## Install
 
-## Supported workflow
-
-- STM32F072CBT6 with a USB-C daughterboard connection.
-- MX hot-swap switches and SK6812MINI-E per-key RGB with cutouts.
-- Placement and matrix GPIO assignment based on available geometry.
-- Controller interfaces, rows, columns and RGB routing, with bounded global recovery.
-- KiCad schematic/PCB/project, BOM, firmware sources, compiled firmware and checks.
-
-Start with the supplied `ansi61` or `compact68` layout. Arbitrary KLE layouts,
-controller families and existing boards are outside this candidate workflow.
-A layout also needs a `keyboard.json` sidecar for its electrical/firmware choices.
-
-## Quick start
-
-Tested native stack: macOS arm64, KiCad 10.0.7, Java 25 and Freerouting 2.5.0.
-Host Python requires 3.11+. KiCad and the QMK/ARM toolchain are installed separately.
-Other platforms have not been checked for native operations.
+Python3.11+ is required. Install the wheel from the
+[Releases page](https://github.com/joxerx/smilepcb/releases), or install source:
 
 ```sh
-git clone https://github.com/joxerx/smilepcb.git
-cd smilepcb
 python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
+. .venv/bin/activate
+python -m pip install .
 ```
 
-Follow the [STM32 setup and build guide](docs/workflows/stm32.md) to configure
-external tools and fetch the pinned public controller source, then run:
+The package contains the complete coordinator, stage workers and fixture inputs.
+Native tools and donor CAD are installed separately. The tested toolchain is
+macOS arm64, KiCad10.0.7, Java25, Freerouting2.5.0 and pinned QMK/ARM tools.
+Follow the [STM32 setup guide](docs/workflows/stm32.md).
+
+## Build from KLE
+
+Supply a KLE file, its matrix/config sidecar, explicit tool paths, the pinned
+public donor directory and a new output directory. The parser supports bounded
+unrotated MX layouts; it does not accept every KLE feature or controller family.
+
+The reference-style profile used for qualification is explicit:
 
 ```sh
-.venv/bin/python recipes/stm32/generate.py \
-  .lab/tools.json first-ansi61 \
-  --fixture ansi61 --native-staged \
-  --process-profile fr4-2l-1oz-0p5-0p2 \
-  --optimize-matrix-gpio --completion-budget-s 3600 \
-  --routing-quality turns
+smilepcb build --kle ./layout.kle.json --config ./keyboard.json \
+  --tools ./tools.json --controller-source ./sources/le-chiffre \
+  --output ./build/keyboard \
+  --unified-controller-plan --component-corridors --coherent-via-banks \
+  --placement-attempts 4 --placement-budget-s 600 \
+  --completion-budget-s 600 --routing-quality turns \
+  --process-profile fr4-2l-1oz-0p5-0p2 --usb-max-length-mm none
 ```
 
-For the other supplied layout, use `--fixture compact68` and a new run tag.
-Results go under `.lab/public-controller/<tag>/`. Existing tags are not overwritten.
-The command accepts a result only after native rule, connectivity and firmware
-checks; failed runs retain diagnostics. Runtime and routing success depend on the
-layout and toolchain. The completion budget is not a deadline for the whole run.
+`none` disables only the geometric USB length cap. It preserves clearance,
+connectivity, pair-skew and the current single-layer/no-via USB checks; it is
+not an impedance or signal-integrity proof. The ordinary default remains20mm.
+The600-second options bound their stages, not the whole command. Run one heavy
+build at a time; heuristic routing does not guarantee completion on any layout.
 
-## Routing changes in 0.2.0rc1
+The package includes ANSI61, Compact68 and a smaller ST40-derived input. Only
+layouts explicitly listed in a release report have full-board qualification.
+No40%/ANSI104 RGB completion guarantee is made for0.3.0.
 
-The candidate fixes copper artwork/field obstacles and routed-net clearance
-checks. The existing routing policy remains the default. Add
-`--routing-quality turns` to the native staged command to test positive bend
-costs, heading-aware search and ranked simple paths. Both modes share USB
-preparation and the external global router's cost model. Native completion and
-recovery receive the selected mode; result files record it.
+## Outputs and acceptance
 
-Preparation now prefers connected signal banks when placing controller supports,
-tries coupled 45-degree USB joins, and reuses existing local return vias. The
-existing native packing, clearance and source-preservation checks remain required.
+A successful build retains a KiCad PCB and schematics, BOM, QMK sources and a
+clean firmware build, plus native and independent verification receipts under
+`finished/`. All generated files and scratch data stay below the chosen output.
+Existing outputs are rejected; the donor source is read-only and checksum-pinned.
 
-Recovery now keeps failed-attempt history across stages and orders native
-connection groups by geometry. Its final disposable search can move generated
-neighbors more readily, while accepting only a fully connected, checked result.
+Acceptance requires the complete matrix, ERC/DRC and schematic parity,
+independent saved-board pad connectivity, matching GPIO/key/LED positions and
+clean QMK. DRC zero refers to the documented
+[five-category rule profile](docs/workflows/stm32.md#rule-scope).
+Failed builds retain diagnostics and do not produce an accepted result.
 
-This option does not guarantee a complete route, fewer vias or reference-quality
-appearance. It does not change fabrication rules, widths, budgets or admission.
-See the [routing policy](docs/workflows/stm32.md#routing-quality).
+## CLI, MCP and development
 
-## Example output
-
-![compact68 RGB: actual front and back copper from an accepted fresh build](docs/images/0.2.0rc1-compact68-rgb.png)
-
-Native KiCad plots from trial 1; both faces are viewed from the front. Ground
-fills are hidden in a display copy for inspection; source copper is unchanged.
-The controller region remains dense. See the
-[61-key RGB example](docs/images/0.2.0rc1-ansi61-rgb.png) and the measured report
-for the source PCB and image hashes.
-
-## CLI and MCP
-
-The full STM32 workflow currently requires a **source checkout** and the recipe
-command above. The wheel contains the core CLI/MCP package; it does not include
-the repository recipe. The older `smilepcb build` command is a separate path.
-
-For the installed CLI's bounded synthetic RGB demo and local stdio MCP server,
-see [CLI and MCP usage](docs/workflows/cli-mcp.md). MCP supports inspect, plan,
-preview, apply, verify and encoder rollback for its supported synthetic profiles.
-It does not yet expose the full STM32 generator.
-
-## Development and references
+`smilepcb-mcp` exposes the same generator through serialized local jobs, with
+explicit workspace boundaries and cancellation cleanup. Existing inspect,
+preview and encoder operations retain their bounded synthetic profiles.
+See [CLI/MCP usage](docs/workflows/cli-mcp.md).
 
 ```sh
-.venv/bin/python -m pytest -q
+python -m pip install -e '.[test]' build
+python -m pytest -q
+python -m build
 ```
 
-Portable policy and driver tests run without native CAD. Native geometry tests
-are enabled with `SMILEPCB_KICAD_PYTHON` pointing to KiCad's bundled interpreter;
-a separate symbol-library check is also optional. Full PCB/firmware qualification
-requires the toolchain in the build guide.
-CI checks Python 3.11/3.14 and packaging.
+CI checks portable tests, built artifacts and installed entry points outside
+the checkout. Native checks require separately selected KiCad/QMK tools.
 
-- `smilepcb/`: circuit model, native workers, routing, validation, CLI and MCP.
-- `recipes/stm32/`: executable generation recipe and two input layouts.
-- [Rules and sources](docs/sources.md): public references behind the recipes.
-- [Contributing](CONTRIBUTING.md): bug reports, feature/recipe proposals and PRs.
-- [Changelog](CHANGELOG.md), [security policy](SECURITY.md), [code of conduct](CODE_OF_CONDUCT.md).
+- [Community and component sources](docs/sources.md)
+- [Contributing and issue/PR guidance](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md), [security policy](SECURITY.md)
 
-This repository contains curated source snapshots for releases. Generated CAD,
-local toolchains and development logs are excluded.
-
-## License
-
-Original SmilePCB code is [MIT](LICENSE). Bundled marbastlib assets retain
-CERN-OHL-P-2.0. External donor designs, KiCad, QMK and Freerouting keep their own
-licenses; generated CAD is not automatically MIT. See [third-party notices](THIRD_PARTY_NOTICES.md).
+Original code is MIT. Bundled CAD and layout-derived inputs retain their own
+licenses; generated CAD is not automatically MIT. See
+[third-party notices](THIRD_PARTY_NOTICES.md).

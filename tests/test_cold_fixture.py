@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-INPUTS = Path(__file__).resolve().parents[1] / 'recipes/stm32/inputs'
+INPUTS = Path(__file__).resolve().parents[1] / 'smilepcb/stm32/inputs'
 
 
 def test_default_and_compact_fixture_preserve_distinct_layouts_and_keycodes():

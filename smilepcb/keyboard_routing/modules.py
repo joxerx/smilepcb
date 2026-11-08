@@ -4,11 +4,16 @@ from .local_router import LocalRouter,xy,distance
 from .power import seed_plane_access
 
 
-def connect_key_modules(board,cfg,*,budget_s=45,via_to_smd_clearance_nm=0):
+def connect_key_modules(board,cfg,*,budget_s=45,via_to_smd_clearance_nm=0,deadline=None):
     stop=time.monotonic()+budget_s
+    if deadline is not None:stop=min(stop,deadline)
     original_ids={t.m_Uuid.AsString() for t in board.GetTracks()}
     router=LocalRouter(board,deadline=stop,compact=True)
     footprints={f.GetReference():f for f in board.GetFootprints()}
+    from .native_graph import copper_graph
+    nets={d.GetNetname() for f in board.GetFootprints() if f.GetReference().startswith(('SW','D','LED','C_LED')) for d in f.Pads() if d.GetNumber() and d.GetNetname()}
+    graph=copper_graph(board,nets,stop,include_zones=False)
+    roots={node['item'].m_Uuid.AsString():graph['find'](i) for i,node in enumerate(graph['nodes'])}
     report=[];returns=[]
     for key in cfg['layout']['keys']:
         index=str(key['id'])
@@ -21,8 +26,8 @@ def connect_key_modules(board,cfg,*,budget_s=45,via_to_smd_clearance_nm=0):
             targets=[d for d in footprints[b].Pads() if d.GetNumber()==nb]
             choices=sorted((distance(xy(x.GetPosition()),xy(y.GetPosition())),j,k,x,y)
                            for j,x in enumerate(sources) for k,y in enumerate(targets))
-            connected=False
-            for _,_,_,x,y in choices:
+            connected=any(x.GetNetname()==y.GetNetname() and roots.get(x.m_Uuid.AsString()) is not None and roots.get(x.m_Uuid.AsString())==roots.get(y.m_Uuid.AsString()) for _,_,_,x,y in choices)
+            for _,_,_,x,y in ([] if connected else choices):
                 if time.monotonic()>=stop:break
                 router.deadline=min(stop,time.monotonic()+.25)
                 if router.connect(x,y):connected=True;break
@@ -31,7 +36,7 @@ def connect_key_modules(board,cfg,*,budget_s=45,via_to_smd_clearance_nm=0):
     planes=set(cfg.get('plane_nets',()))
     return_ids=sorted(t.m_Uuid.AsString() for t in board.GetTracks()
                       if t.GetNetname() in planes and t.m_Uuid.AsString() not in original_ids)
-    return {'connections':sum(v['connected'] for v in report),'attempts':report,
+    return {'accepted':all(v['connected'] for v in report) and len(access)==len(returns) and all(v['connected'] for v in access),'connections':sum(v['connected'] for v in report),'attempts':report,
             'added_ids':router.added,'return_ids':return_ids,'plane_access':access,'budget_exhausted':time.monotonic()>=stop}
 
 

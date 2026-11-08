@@ -2,32 +2,38 @@
 
 Changes are recorded here and on the GitHub Releases page.
 
-## 0.2.0rc1 — prerelease (2026-10-31)
+## 0.3.0 — release preparation
 
-Experimental prerelease. Four fresh current-source builds passed the full
-KLE → two-layer RGB PCB → clean matching QMK workflow: two each of ANSI61 and
-compact68. All have zero native ERC/DRC findings under the documented profile,
-zero schematic parity/unconnected findings and zero independent pad-group gaps.
-Measured full-command times are 20:20–20:42 for ANSI61 and 28:12–30:22 for
-compact68. See [measurements](docs/qualification/0.2.0rc1.json).
+- Package the complete KLE-to-STM32 coordinator, native stage workers and input
+  resources in both wheel and source distribution; retain source recipe wrappers.
+- Add an explicit reference-style profile: opposite-face matrix roles,
+  straight row trunks, vertical/45-degree column fields and grouped MCU feeders.
+- Carry proved controller source/local ownership through matrix completion and
+  retain actual contact/clearance checks across bounded local recovery.
+- Reserve placement refinement time and distribute interrupted search samples
+  across physical space instead of exhausting one narrow prefix.
+- Expose the same generator through bounded, serialized CLI/MCP jobs with
+  cancellation cleanup and explicit input/output/tool paths.
+- Repeat full ANSI61/Compact68 RGB qualification before publication. Dense40%
+  and ANSI104 RGB remain outside the qualified scope; no hardware test is claimed.
+- Preserve existing licenses, public source attribution and the documented
+  five-category DRC rule scope.
 
-Qualification covers the supplied fixtures on the documented runtime. It does
-not establish universal completion, identical geometry, reference-quality
-appearance or fabricated-hardware validation. No comparative performance claim
-is made against an unmatched baseline.
+## 0.2.0rc1 — 2026-10-31
 
-The staged coordinator still does not rank global and native checkpoints by
-future completion difficulty. A failed global job now retains a physically
-checked native checkpoint when one exists; final acceptance remains mandatory.
-See the [workflow limitations](docs/workflows/stm32.md#routing-quality).
+Published experimental prerelease, qualified source `fc08beec`. Two ANSI61 and two
+Compact68 fresh builds passed the documented native ERC/DRC/connectivity and
+matching clean QMK gates on the recorded toolchain. The immutable
+[release report](docs/qualification/0.2.0rc1.json) covers that runtime only;
+it does not qualify the current installed collector changes. This older release
+required its source recipe for full generation; its wheel carried core CLI/MCP.
 
 - Make native component ordering depend on conductor geometry rather than
   random identities or iteration order.
 - Preserve failed-attempt history across ordinary and provisional recovery.
-- Allow the final owned elastic search to explore lower-displacement-cost
-  candidates without relaxing physical rules or admitting partial results.
 - In turns mode, balance displacement cost and heuristic guidance to avoid
   cutting completed connections when a cheaper bypass is available.
+
 - Index native copper artwork, text and footprint fields in both local
   collision oracles; exclude registration targets from physical milling edges.
 - Apply the routed net's effective clearance as well as the obstacle's, including

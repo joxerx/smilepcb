@@ -50,7 +50,7 @@ def deadline(seconds):
     return time.monotonic()+seconds
 
 
-def filled_zones(board):
+def filled_zones(board, *, deferred_ids=()):
     """Use actual filled copper, never a zone's uncut boundary as an obstacle.
 
     Callers refill candidate boards before and after edits and run native DRC.
@@ -58,9 +58,14 @@ def filled_zones(board):
     """
     if board.GetCopperLayerCount()!=2:
         raise ValueError('Style recipes currently support two copper layers')
+    deferred=set(deferred_ids)
+    zones={z.m_Uuid.AsString():z for z in board.Zones()}
+    if not deferred<=zones.keys():raise ValueError('Deferred fill does not exist')
+    if any(zones[u].IsLocked() or zones[u].GetIsRuleArea() for u in deferred):
+        raise ValueError('Locked zones and rule areas cannot be deferred')
     result=[]
     for zone in board.Zones():
-        if zone.GetIsRuleArea():continue
+        if zone.GetIsRuleArea() or zone.m_Uuid.AsString() in deferred:continue
         if not zone.IsFilled() or zone.NeedRefill():
             raise ValueError('Refill copper zones before applying routing style')
         for layer in (p.F_Cu,p.B_Cu):

@@ -1,5 +1,6 @@
 """Native operations for explicitly generated full keyboard projects."""
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -161,33 +162,199 @@ def pad_gaps(board):
     return {net:len(roots)-1 for net,roots in groups.items() if len(roots)>1}
 
 
-def verify_usb_pair(board):
+def verify_usb_pair(board,*,max_length_nm=...):
     """The no-via USB recipe follows the physical controller copper face."""
+    from smilepcb.usb_policy import resolve_usb_max_length_nm,usb_length_allowed
+    max_length_nm=resolve_usb_max_length_nm(max_length_nm)
     controllers=[f for f in board.GetFootprints() if f.GetReference()=='U_MCU']
     if len(controllers)!=1:raise ValueError('USB recipe requires exactly one U_MCU footprint')
     controller=controllers[0]
-    layer=controller.GetLayer();lengths={}
+    layer=controller.GetLayer();lengths={};lengths_nm={}
     for net in ('USB_DP','USB_DM'):
         tracks=[t for t in board.GetTracks() if t.GetNetname()==net]
         if any(isinstance(t,p.PCB_VIA) or t.GetLayer()!=layer for t in tracks):
             raise ValueError('USB recipe contains a via or changed copper layer')
-        lengths[net]=sum(t.GetLength() for t in tracks)/1e6
-    if not all(0<v<20 for v in lengths.values()) or abs(lengths['USB_DP']-lengths['USB_DM'])>=.5:
+        lengths_nm[net]=math.fsum(sorted(t.GetLength() for t in tracks));lengths[net]=lengths_nm[net]/1e6
+    if not all(usb_length_allowed(v,max_length_nm) for v in lengths_nm.values()) or abs(lengths['USB_DP']-lengths['USB_DM'])>=.5:
         raise ValueError('USB pair length or skew exceeds the recipe envelope')
     return lengths
+
+
+def _admit_interface_delta(entry,board,before,after,ports,resolved,*,deadline,repair_reserved=()):
+    """All backends owe the same entry-source boundary, even raw imports."""
+    import time
+    from collections import defaultdict
+    from smilepcb.keyboard_routing.interface_launches import interface_identity
+    def budget():
+        if time.monotonic()>=deadline:raise TimeoutError('Controller delta admission deadline exhausted')
+    budget()
+    from smilepcb.routing_copper import uncovered
+    changed={}
+    for uid,shape in after['tracks'].items():
+        old=before['tracks'].get(uid)
+        if old==shape:continue
+        pieces=uncovered(shape,[old]) if old is not None and shape['class']=='PCB_TRACK' else [shape]
+        if pieces:changed[uid]=pieces
+    if not changed:return
+    from smilepcb.keyboard_routing.port_policy import PortPolicy
+    policy=PortPolicy(entry,ports,resolved=set(map(tuple,resolved)),repair_reserved=repair_reserved)
+    original=set(policy.resolved);groups=defaultdict(list)
+    for item in board.GetTracks():
+        if item.m_Uuid.AsString() in changed:groups[item.GetNetname()].append((item,changed[item.m_Uuid.AsString()]))
+    physical={**before['tracks'],**{d['uuid']:d for f in before.get('footprints',{}).values() for d in f['pads']}}
+    sources={t.m_Uuid.AsString():t for t in entry.GetTracks()}
+    sources.update({d.m_Uuid.AsString():d for f in entry.GetFootprints() for d in f.Pads()})
+    for net,items in groups.items():
+        budget()
+        dormant=[q for q in ports if q['net']==net and interface_identity(q) in original]
+        available={interface_identity(q) for q in dormant if all(
+            uid in physical and q['source_shapes'].get(uid)==physical[uid] for uid in q['added_ids']+q['pad_ids'])}
+        # A strategy cannot bypass a source boundary by reopening and closing
+        # an entry-complete net before its final native partition is checked.
+        policy.set_resolved(original-available)
+        stale=[q for q in dormant if interface_identity(q) not in available]
+        for item,pieces in items:
+            for piece in pieces:
+                budget();net=piece['net']
+                if piece['class']=='PCB_TRACK':
+                    a,z=tuple(piece['start']),tuple(piece['end'])
+                    accepted=policy.accepts_segment(a,z,piece['layer'],net,piece['width'])
+                    shapes={piece['layer']:p.SHAPE_SEGMENT(p.VECTOR2I(*a),p.VECTOR2I(*z),piece['width'])} if stale else {}
+                elif isinstance(item,p.PCB_VIA):
+                    point=item.GetPosition();width=max(item.GetWidth(layer) for layer in (p.F_Cu,p.B_Cu) if item.IsOnLayer(layer))
+                    accepted=policy.accepts_via((point.x,point.y),net,width)
+                    shapes={layer:item.GetEffectiveShape(layer) for layer in (p.F_Cu,p.B_Cu) if item.IsOnLayer(layer)} if stale else {}
+                else:accepted=False;shapes={}
+                if not accepted:raise ValueError('New copper violates controller first-contact boundary')
+                for q in stale:
+                    for uid in q['added_ids']+q['pad_ids']:
+                        old=sources.get(uid)
+                        if old is not None and any(old.IsOnLayer(layer) and
+                                p.SHAPE.Collide(shape,old.GetEffectiveShape(layer),0) for layer,shape in shapes.items()):
+                            raise ValueError('New copper touches a retired controller source without a live head')
+    budget()
 
 
 def run(request):
     from smilepcb.keyboard_routing.generation import generation_profile
     from smilepcb.routing_quality import using_quality_profile
-    with generation_profile(request.get('generation_profile','native')),using_quality_profile(request.get('routing_quality','legacy')) as quality:
-        result=_run(request)
+    with generation_profile(request.get('generation_profile','native')) as creation,using_quality_profile(request.get('routing_quality','legacy')) as quality:
+        from smilepcb.keyboard_routing.field_contract import guarded,load as load_field
+        from smilepcb.keyboard_routing.interface_launches import reserve_launches
+        from smilepcb.keyboard_routing.interface_contract import MARKER,load_verified_interfaces
+        import time
+        operation_seconds=90
+        if request['operation']=='joint_repair':
+            budget=request.get('budget_s',82)
+            if type(budget) not in (int,float) or not 0<budget<=150:raise ValueError('Joint repair budget must be in (0,150] seconds')
+            operation_seconds=budget+8
+        operation_end=time.monotonic()+operation_seconds
+        def planned(checked):
+            project=Path(checked.get('board','')).parent
+            contract=load_field(project)
+            # guarded() independently proves the full matrix. Retire only
+            # natively completed nets; other functions keep their live heads.
+            full_handoff=contract is not None and contract.get('scope')=='matrix-with-controller'
+            ports=[];resolved=();source_tracks={};frozen_repair_nets=set();repair_reserved=set();entry=None;before=None;preflight_elapsed=0;model=project/'.smilepcb-keyboard.json'
+            if checked['operation']!='create' and model.is_file():
+                cfg=json.loads(model.read_text())
+                if (project/MARKER).exists() or cfg.get('routing_preparation',{}).get('mode') in ('ordered-banks-v1','ordered-banks-v2'):
+                    started=time.monotonic()
+                    entry=p.LoadBoard(checked['board'])
+                    interface=load_verified_interfaces(entry,cfg,project,
+                        deadline=started+10,retire_completed=full_handoff)
+                    ports=interface['ports'] if interface else []
+                    if full_handoff:
+                        before=json.loads(json.dumps(w.snapshot(entry)))
+                        source_tracks=interface['source_tracks'] if interface else {}
+                        resolved=interface.get('resolved',()) if interface else ()
+                        if checked['operation'] in ('complete','completion_candidates','joint_repair'):
+                            from smilepcb.keyboard_routing.repair_source_scope import repair_source_scope
+                            preserved,frozen_repair_nets=repair_source_scope(before,ports,resolved,deadline=operation_end)
+                            source_tracks={**source_tracks,**preserved}
+                            from smilepcb.keyboard_routing.interface_launches import interface_identity
+                            repair_reserved={interface_identity(q) for q in ports if q['net'] not in frozen_repair_nets
+                                and set(q['added_ids'])<=preserved.keys()}
+                        checked={**checked,'protected_ids':sorted(set(checked.get('protected_ids',()))|set(source_tracks))}
+                        preflight_elapsed=time.monotonic()-started
+            with reserve_launches(ports,resolved=resolved,repair_reserved=repair_reserved):
+                result=_run(checked,preflight_elapsed_s=preflight_elapsed) if preflight_elapsed else _run(checked)
+                if full_handoff and ports:
+                    candidate=p.LoadBoard(checked['board']);after=json.loads(json.dumps(w.snapshot(candidate)))
+                    if any(after['tracks'].get(uid)!=shape for uid,shape in source_tracks.items()):
+                        raise ValueError('Live controller source copper changed during operation')
+                    if frozen_repair_nets:
+                        from smilepcb.keyboard_routing.repair_source_scope import verify_frozen_repair_nets
+                        verify_frozen_repair_nets(before,after,frozen_repair_nets,deadline=operation_end)
+                    _admit_interface_delta(entry,candidate,before,after,ports,resolved,deadline=operation_end,repair_reserved=repair_reserved)
+                return result
+        result=guarded(request,planned)
         result['routing_quality']=quality.name
+        result['generation_profile']=creation.name
         return result
 
 
-def _run(request):
+def _run(request,*,preflight_elapsed_s=0):
+    def remaining_budget(seconds):
+        left=seconds-preflight_elapsed_s
+        if left<=0:raise TimeoutError('Controller interface proof exhausted the operation budget')
+        return left
     if request['operation']=='create': return create(request)
+    if request['operation']=='joint_repair':
+        import time
+        from smilepcb.keyboard_routing.joint_repair_native import repair_saved
+        board=p.LoadBoard(request['board']);validate(board,request)
+        budget=request.get('budget_s',82)
+        if type(budget) not in (int,float) or not 0<budget<=150:raise ValueError('Joint repair budget must be in (0,150] seconds')
+        return repair_saved(request,deadline=time.monotonic()+remaining_budget(budget))
+    if request['operation']=='field_verify':
+        from smilepcb.keyboard_routing.field_contract import load,verify_native
+        import time
+        board=p.LoadBoard(request['board']);validate(board,request)
+        contract=load(Path(request['board']).parent)
+        if contract is None:raise ValueError('Missing matrix field contract')
+        return {'accepted':True,'protected_ids':verify_native(board,contract,deadline=time.monotonic()+remaining_budget(15)),'scope':contract.get('scope'),'controller_connected':contract.get('scope')=='matrix-with-controller','field_generation_profile':contract.get('generation_profile')}
+    if request['operation']=='matrix_field':
+        import time
+        from smilepcb.keyboard_routing.field import build_field
+        from smilepcb.keyboard_routing.field_contract import MARKER,capture,verify_native,load,publish
+        path=Path(request['board']);board=p.LoadBoard(str(path));validate(board,request)
+        if load(path.parent) is not None:raise ValueError('A matrix field is already present')
+        include_controller=request.get('include_controller',False)
+        if type(include_controller) is not bool:raise ValueError('Matrix controller scope must be boolean')
+        maximum=220 if include_controller else 65
+        budget=request.get('budget_s',maximum)
+        if type(budget) not in (int,float) or not 0<budget<=maximum:raise ValueError('Matrix budget exceeds the declared scope')
+        controllers=[f for f in board.GetFootprints() if f.GetReference()=='U_MCU']
+        if len(controllers)!=1:raise ValueError('Matrix face selection requires one controller')
+        row_layer=controllers[0].GetLayer();column_layer=p.F_Cu if row_layer==p.B_Cu else p.B_Cu
+        cfg=json.loads((path.parent/'.smilepcb-keyboard.json').read_text())
+        deadline=time.monotonic()+remaining_budget(budget);original=path.read_bytes();result={}
+        try:
+            if include_controller:
+                from smilepcb.keyboard_routing.matrix_stage import prepare_matrix
+                from smilepcb.keyboard_routing.interface_contract import load_verified_interfaces
+                interface=load_verified_interfaces(board,cfg,path.parent,deadline=deadline)
+                result=prepare_matrix(board,cfg,row_layer=row_layer,column_layer=column_layer,deadline=deadline,ports=interface['ports'] if interface else None)
+            else:
+                result=build_field(board,cfg,row_layer=row_layer,column_layer=column_layer,deadline=deadline)
+            if result['complete']:
+                contract=capture(w.snapshot(board),result)
+                # The saved-candidate proof is the publication gate; it uses
+                # the same deadline rather than a fresh post-routing budget.
+                publish(board,path,contract,deadline=deadline)
+        except TimeoutError as error:
+            if path.read_bytes()!=original:path.write_bytes(original)
+            (path.parent/MARKER).unlink(missing_ok=True)
+            result.update(complete=False,controller_connected=False,
+                          reason='Matrix deadline exhausted: '+str(error))
+        if include_controller and not result['complete']:
+            diagnostic=path.parent/'.smilepcb-matrix-rejected.kicad_pcb'
+            if not p.SaveBoard(str(diagnostic),board):raise ValueError('Cannot save rejected matrix diagnostic')
+            result['diagnostic_board']=str(diagnostic)
+        result['accepted']=result['complete']
+        return result
+
     if request['operation'] in ('key_data_access','controller_return_tree'):
         from smilepcb.keyboard_routing.modules import seed_key_data_access
         from smilepcb.keyboard_routing.power import connect_controller_return_tree
@@ -199,7 +366,7 @@ def _run(request):
         board=p.LoadBoard(request['board']);validate(board,request)
         cfg=json.loads((Path(request['board']).parent/'.smilepcb-keyboard.json').read_text())
         helper=seed_key_data_access if operation=='key_data_access' else connect_controller_return_tree
-        result=helper(board,cfg,budget_s=budget)
+        result=helper(board,cfg,budget_s=remaining_budget(budget))
         if result['accepted'] and not p.SaveBoard(request['board'],board):
             raise ValueError('Cannot save '+operation)
         return result
@@ -214,13 +381,27 @@ def _run(request):
         cfg=json.loads((Path(request['board']).parent/'.smilepcb-keyboard.json').read_text())
         refs={part['ref'] for part in cfg['parts'] if part['region']=='controller' and not part['ref'].startswith('#')}
         before=w.snapshot(board);edge=board.GetDesignSettings().m_CopperEdgeClearance
-        deadline=time.monotonic()+budget
+        deadline=time.monotonic()+remaining_budget(budget)
+        from smilepcb.keyboard_routing.interface_contract import load_verified_interfaces
+        from smilepcb.keyboard_routing.field_contract import load as load_field
+        contract=load_field(Path(request['board']).parent)
+        # run() has already proved the complete matrix through guarded().
+        # Retired heads may disappear only while native pad closure still holds;
+        # unfinished control signals retain their exact live source copper.
+        full_handoff=contract is not None and contract.get('scope')=='matrix-with-controller'
+        interface=load_verified_interfaces(board,cfg,Path(request['board']).parent,
+            deadline=deadline,retire_completed=full_handoff)
         try:
             board.GetDesignSettings().m_CopperEdgeClearance=max(edge,250000)
             ports=route_controller_ports(board,controller_refs=refs,mcu_refs={'U_MCU'},
                 plane_nets=set(cfg['plane_nets']),usb_nets={'USB_DP','USB_DM'},
                 clearance_nm=max(board.GetDesignSettings().m_MinClearance,173000),deadline=deadline,
-                include_auxiliary_returns=True)
+                include_auxiliary_returns=interface is None,
+                access_mode='via' if interface is None else 'prefer_same_layer',
+                include_nets=None if interface is None else
+                    {d.GetNetname() for f in board.GetFootprints() if f.GetReference() in refs for d in f.Pads()}-{q['net'] for q in interface['ports']}-set(cfg['plane_nets'])-set(interface.get('local_closed_nets',())))
+            if interface is not None and ports['accepted']:
+                ports['ports'].extend(interface['ports']);ports['added_ids']=sorted(set(ports['added_ids'])|set(interface['owned_ids']));ports['prepared_banks_verified']=True
             returns=seed_controller_returns(board,controller_refs=refs,plane_nets=set(cfg['plane_nets']),
                 deadline=deadline,via_to_smd_clearance_nm=200000) if ports['accepted'] else None
             accepted=ports['accepted'] and returns['accepted']
@@ -237,29 +418,30 @@ def _run(request):
         board=p.LoadBoard(request['board']);validate(board,request)
         protected=set(request['protected_ids'])
         if request['operation']=='completion_candidates':
-            return {'candidates':detour_candidates(board,protected=protected,deadline=time.monotonic()+20)}
+            return {'candidates':detour_candidates(board,protected=protected,deadline=time.monotonic()+remaining_budget(20))}
         cfg=json.loads((Path(request['board']).parent/'.smilepcb-keyboard.json').read_text())
         result=repair_candidate(board,request['strategy'],protected=protected,plane_nets=set(cfg['plane_nets']),
-                                request=request,deadline=time.monotonic()+82)
+                                request=request,deadline=time.monotonic()+remaining_budget(82))
         if result['accepted'] and not p.SaveBoard(request['board'],board):raise ValueError('Cannot save accepted completion')
         return result
     if request['operation']=='local_modules':
         from smilepcb.keyboard_routing.modules import connect_key_modules
         board=p.LoadBoard(request['board']);validate(board,request)
         cfg=json.loads((Path(request['board']).parent/'.smilepcb-keyboard.json').read_text())
-        result=connect_key_modules(board,cfg,via_to_smd_clearance_nm=request.get('via_to_smd_clearance_nm',0))
+        result=connect_key_modules(board,cfg,budget_s=remaining_budget(45),via_to_smd_clearance_nm=request.get('via_to_smd_clearance_nm',0))
         if not p.SaveBoard(request['board'],board):raise ValueError('Cannot save key-module routing')
         return result
     if request['operation']=='prune_reported_tails':
         from smilepcb.keyboard_routing.cleanup import prune_reported_tails
         board=p.LoadBoard(request['board']);validate(board,request)
-        result=prune_reported_tails(board,request['findings'],protected=set(request['protected_ids']))
+        result=prune_reported_tails(board,request['findings'],protected=set(request['protected_ids']),budget_s=remaining_budget(30))
         if not p.SaveBoard(request['board'],board):raise ValueError('Cannot save reported-tail cleanup')
         return result
     if request['operation']=='cleanup':
         from smilepcb.keyboard_routing.cleanup import cleanup_generated
         board=p.LoadBoard(request['board']);validate(board,request)
-        result=cleanup_generated(board,protected=set(request['protected_ids']))
+        import time
+        result=cleanup_generated(board,protected=set(request['protected_ids']),deadline=time.monotonic()+remaining_budget(60))
         if not p.SaveBoard(request['board'],board):raise ValueError('Cannot save tail cleanup')
         return result
     if request['operation']=='negotiate':
@@ -277,7 +459,7 @@ def _run(request):
         if 'track_width_nm' in request:
             from smilepcb.keyboard_routing.local_router import LocalRouter
             factory=lambda b,**kw:LocalRouter(b,track_width_nm=request['track_width_nm'],**kw)
-        result=negotiate_routes(board,nets,set(request['protected_ids']),time.monotonic()+45,
+        result=negotiate_routes(board,nets,set(request['protected_ids']),time.monotonic()+remaining_budget(45),
                                 router_factory=factory,attempt_counts=request.get('attempt_counts',{}))
         for zone in zones:board.Add(zone)
         if zones and not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Cannot refill after negotiation')
@@ -338,6 +520,10 @@ def _run(request):
                  and abs((d.GetPosition().x,d.GetPosition().y)[axis]-coordinates[axis])<p.FromMM(.01)]
             partition=sum((d.GetPosition().x,d.GetPosition().y)[tangent]<coordinates[tangent] for d in usb)
             groups[axis,sign,partition].append(pad)
+        from smilepcb.keyboard_routing.local_router import LocalRouter,vec
+        from smilepcb.keyboard_routing.interface_launches import current_launches
+        live={uid:q for q in current_launches() for uid in q['pad_ids']}
+        path_router=LocalRouter(board,compact=True,track_width_nm=p.FromMM(.15))
         oracle=Clearance(board);report=[]
         for (axis,sign,partition),pads in groups.items():
             tangent=1-axis
@@ -357,15 +543,25 @@ def _run(request):
             normal=coords(pads[0])[axis]+sign*(p.FromMM(.9)+max_spread)
             for pad in sorted(pads,key=lambda d:coords(d)[tangent]):
                 if external_nets is not None and pad.GetNetname() not in external_nets:continue
+                prepared=live.get(pad.m_Uuid.AsString())
+                if prepared is not None:
+                    report.append({'pin':pad.GetNumber(),'net':pad.GetNetname(),'routed':False,
+                        'retained_interface':True,'endpoint_nm':list(prepared['exit_nm']),
+                        'exit_layer':prepared['exit_layer']})
+                    continue
                 a=coords(pad);b=list(a);b[axis]+=sign*p.FromMM(.9)
                 t=mean+2*(a[tangent]-mean)
                 c=list(b);c[tangent]=t;c[axis]+=sign*abs(t-a[tangent])
                 d=list(c);d[axis]=normal
                 path=[a,tuple(b),tuple(c),tuple(d)]
                 path=[q for i,q in enumerate(path) if not i or q!=path[i-1]]
-                if not all(oracle.clear(u,v,p.FromMM(.15),face,pad.GetNetname()) for u,v in zip(path,path[1:])):
+                if not all(oracle.clear(u,v,p.FromMM(.15),face,pad.GetNetname()) and
+                        path_router.clear(p.SHAPE_SEGMENT(vec(u),vec(v),p.FromMM(.15)),face,pad.GetNetname())
+                        for u,v in zip(path,path[1:])):
                     report.append({'pin':pad.GetNumber(),'net':pad.GetNetname(),'routed':False,'path_nm':path});continue
                 ids=add_path(board,oracle,path,face,pad.GetNetname(),p.FromMM(.15))
+                for item in board.GetTracks():
+                    if item.m_Uuid.AsString() in ids:path_router.index(item)
                 report.append({'pin':pad.GetNumber(),'net':pad.GetNetname(),'routed':True,'ids':ids,
                                'endpoint_nm':list(d),'axis':axis,'sign':sign})
         # Give each fanned-out port access to both routing layers before
@@ -449,7 +645,7 @@ def _run(request):
             nets-=outside|{'USB_DP','USB_DM'}
         nets-=set(request.get('exclude_nets',()))
         if 'include_nets' in request:nets&=set(request['include_nets'])
-        router=KeyboardRouter(board,deadline=time.monotonic()+45,compact=True,reserved_shapes=reserved_shapes,
+        router=KeyboardRouter(board,deadline=time.monotonic()+remaining_budget(45),compact=True,reserved_shapes=reserved_shapes,
                               track_width_nm=request.get('track_width_nm'))
         router.grid_step=request.get('grid_step_nm',1000000)
         router.attempt_counts=request.get('attempt_counts',{})
@@ -486,7 +682,7 @@ def _run(request):
         from smilepcb.keyboard_routing.safety import require_via_land_clearance
         land_checks=require_via_land_clearance(board,deadline=time.monotonic()+10)
         nets={d.GetNetname() for f in board.GetFootprints() for d in f.Pads() if d.GetNumber() and d.GetNetname()}
-        graph=copper_graph(board,nets,time.monotonic()+45)
+        graph=copper_graph(board,nets,time.monotonic()+remaining_budget(45))
         pad_groups=defaultdict(set)
         for i,node in enumerate(graph['nodes']):
             if isinstance(node['item'],p.PAD) and node['item'].GetNumber():
@@ -500,10 +696,21 @@ def _run(request):
         disconnected={net:[{'pad_count':len(pads),'sample_pads':sorted(pads)[:16]}
                            for pads in sorted(groups.values(),key=lambda rows:(len(rows),sorted(rows)))]
                       for net,groups in members.items()}
-        usb=verify_usb_pair(board)
+        usb=verify_usb_pair(board,max_length_nm=request.get('usb_max_length_nm',...))
         from smilepcb.routing_quality import copper_metrics
+        from smilepcb.keyboard_phases import ordered_nets
+        from smilepcb.keyboard_routing.role_quality import cohesion_summary
+        tracks=w.snapshot(board)['tracks'];names={t['net'] for t in tracks.values()}
+        roles={label:set(values) for label,values in ordered_nets(cfg)}
+        roles['power']={net for net in names if net.startswith('+')}
+        roles['returns']=set(cfg['plane_nets']);roles['usb']={'USB_DP','USB_DM'}&names
+        roles['control']-=roles['power']|roles['returns']|roles['usb']
+        roles['other']=names-set().union(*roles.values())
+        box=board.GetBoardEdgesBoundingBox()
+        cohesion=cohesion_summary(tracks,roles,(box.GetLeft(),box.GetTop(),box.GetRight(),box.GetBottom()),
+            preferred_edge_gap_nm=board.GetDesignSettings().m_MinClearance)
         return {'copper_layers':board.GetCopperLayerCount(),'pad_groups_missing':gaps,'pad_group_gaps':sum(gaps.values()),'usb_lengths_mm':usb,
-                'copper_metrics':copper_metrics(w.snapshot(board)['tracks']),
+                'copper_metrics':copper_metrics(tracks),'bundle_cohesion':cohesion,
                 'disconnected_pad_groups':disconnected,
                 'via_land_checks':land_checks,
                 'all_pin_nets_match':True,'all_key_and_led_centres_match':True}
@@ -518,7 +725,7 @@ def _run(request):
         # miss the short return path between the components that need it.
         planes=cfg.get('plane_nets')
         if planes is None:planes={z.GetNetname() for z in board.Zones() if not z.GetIsRuleArea() and z.GetNetname()}
-        result=connect_plane_returns(board,planes,deadline=time.monotonic()+45,
+        result=connect_plane_returns(board,planes,deadline=time.monotonic()+remaining_budget(45),
                                      grid_step_nm=request.get('grid_step_nm',500000))
         if not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Cannot refill after stitching')
         if not p.SaveBoard(request['board'],board):raise ValueError('Cannot save plane stitching')
@@ -529,7 +736,7 @@ def _run(request):
         zones=[z.Duplicate(False) for z in board.Zones() if not z.GetIsRuleArea()]
         for zone in list(board.Zones()):
             if not zone.GetIsRuleArea():board.Delete(zone)
-        result=connect_components(board,budget_s=request.get('budget_s',45),max_length_mm=request.get('max_length_mm',30),
+        result=connect_components(board,budget_s=remaining_budget(request.get('budget_s',45)),max_length_mm=request.get('max_length_mm',30),
                                   plane_nets=request.get('plane_nets',()))
         for zone in zones:board.Add(zone)
         if zones and not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Cannot refill after local repair')

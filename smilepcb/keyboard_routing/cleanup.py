@@ -202,7 +202,7 @@ def normalize_shallow_branches(board, *, editable_ids, budget_s=30):
     return {'changes':changes,'removed_ids':removed,'added_ids':added}
 
 
-def cleanup_generated(board, *, protected):
+def cleanup_generated(board, *, protected, deadline=None):
     """Clean only editable copper and preserve the exact native pad partition.
 
     Existing open groups are permitted here; no connected or disconnected pad
@@ -211,7 +211,13 @@ def cleanup_generated(board, *, protected):
     from collections import defaultdict
     from smilepcb.native_worker import snapshot
     from .native_graph import copper_graph
-    stop=time.monotonic()+60;before=snapshot(board);protected=set(protected)
+    stop=time.monotonic()+60
+    if deadline is not None:stop=min(stop,deadline)
+    def remaining():
+        left=stop-time.monotonic()
+        if left<=0:raise TimeoutError('Generated cleanup deadline exhausted')
+        return min(30,left)
+    remaining();before=snapshot(board);protected=set(protected)
     if protected-before['tracks'].keys():raise ValueError('Protected routing object is missing')
     def partition():
         nets={pad.GetNetname() for f in board.GetFootprints() for pad in f.Pads()
@@ -227,10 +233,10 @@ def cleanup_generated(board, *, protected):
     for z in list(board.Zones()):
         if not z.GetIsRuleArea():board.Delete(z)
     editable=before['tracks'].keys()-protected
-    junctions=normalize_shallow_branches(board,editable_ids=editable,budget_s=min(30,stop-time.monotonic()))
+    junctions=normalize_shallow_branches(board,editable_ids=editable,budget_s=remaining())
     for z in zones:board.Add(z)
     if zones and not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Cannot refill after junction cleanup')
-    result=remove_tails(board,protected=protected,budget_s=min(30,stop-time.monotonic()))
+    result=remove_tails(board,protected=protected,budget_s=remaining())
     if zones and not p.ZONE_FILLER(board).Fill(board.Zones()):raise ValueError('Cannot refill after tail cleanup')
     after=snapshot(board)
     if after['footprints']!=before['footprints']:raise ValueError('Cleanup changed a footprint')

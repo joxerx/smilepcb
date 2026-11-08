@@ -3,6 +3,7 @@ import importlib.util
 import math
 from pathlib import Path
 import sys
+import pytest
 from types import SimpleNamespace
 
 from smilepcb.routing_quality import current_quality,path_cost,using_quality_profile
@@ -88,22 +89,24 @@ def test_search_can_turn_after_a_via_without_carrying_the_old_heading(monkeypatc
         assert sum(path_cost(points) for _,points in router.legs)==6000000
 
 
-def test_dsn_grid_terminal_leads_are_exact_octile_paths_in_both_quality_modes(monkeypatch):
+@pytest.mark.parametrize('generation',['dsn-safe-v1','dsn-process-v2'])
+def test_dsn_grid_terminal_leads_are_exact_octile_paths_in_both_quality_modes(monkeypatch,generation):
     grid=engine(monkeypatch)
     a,z=(103,207),(3000106,2000209)
     for mode in ('legacy','turns'):
         with using_quality_profile(mode):
             router=GraphRouter([]);router.clear=lambda *args:True
-            router.generation=SimpleNamespace(name='dsn-safe-v1')
+            router.generation=SimpleNamespace(name=generation)
             assert grid.search(router,a,z,[0],[0],'signal'),router.last_search
             assert router.legs[0][1][0]==a and router.legs[-1][1][-1]==z
             assert all(not dx or not dy or abs(dx)==abs(dy) for _,points in router.legs
                        for x,y in zip(points,points[1:]) for dx,dy in [(y[0]-x[0],y[1]-x[1])])
 
 
-def test_dsn_terminal_reconstruction_cannot_cut_across_a_blocked_octile_lead(monkeypatch):
+@pytest.mark.parametrize('generation',['dsn-safe-v1','dsn-process-v2'])
+def test_dsn_terminal_reconstruction_cannot_cut_across_a_blocked_octile_lead(monkeypatch,generation):
     grid=engine(monkeypatch)
     a,z=(103,207),(3000106,2000209)
-    router=GraphRouter([(a,z,0)]);router.generation=SimpleNamespace(name='dsn-safe-v1')
+    router=GraphRouter([(a,z,0)]);router.generation=SimpleNamespace(name=generation)
     assert not grid.search(router,a,z,[0],[0],'signal')
     assert router.added==[]

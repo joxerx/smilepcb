@@ -1,0 +1,26 @@
+{
+  "repo": "sporkus/le_chiffre_keyboard_stm32",
+  "commit": "57f64495c4b6dca1566b8ddbd464849c4023a56f",
+  "files": [
+    {
+      "path": "readme.md",
+      "sha256": "fa0a930aee20d41f7c497e3c59798a01d5b50701e84f3c2d105258900ce143e1",
+      "url": "https://raw.githubusercontent.com/sporkus/le_chiffre_keyboard_stm32/57f64495c4b6dca1566b8ddbd464849c4023a56f/readme.md"
+    },
+    {
+      "path": "kicad/pcb/stm32_hotswap_chiffre.kicad_pcb",
+      "local": "stm32_hotswap_chiffre.kicad_pcb",
+      "bytes": 3573631,
+      "sha256": "984473f03db99eda31c3b5f12a3bb2e3d07199ed8e2577d0f6cd78b123639b82",
+      "git_blob_sha1": "a85e02c891f3a0115c231b96939da4e843632d78",
+      "url": "https://github.com/sporkus/le_chiffre_keyboard_stm32/blob/57f64495c4b6dca1566b8ddbd464849c4023a56f/kicad/pcb/stm32_hotswap_chiffre.kicad_pcb"
+    },
+    {
+      "path": "COPYING",
+      "local": "COPYING",
+      "sha256": "dace379a3904df08a95cffce51a35725e88c0f12df1bf12d5a10e25d7123e561",
+      "bytes": 14541,
+      "url": "https://raw.githubusercontent.com/sporkus/le_chiffre_keyboard_stm32/57f64495c4b6dca1566b8ddbd464849c4023a56f/COPYING"
+    }
+  ]
+}

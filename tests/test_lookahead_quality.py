@@ -7,18 +7,19 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from smilepcb.usb_policy import configured_usb_max_length_nm
 from smilepcb.keyboard_lookahead import provisional_step,run_lookahead
 from smilepcb.routing_quality import current_quality
 
 
 def test_disposable_lookahead_sends_the_selected_quality_to_its_worker(tmp_path,monkeypatch):
     project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
-    (project/'keyboard.kicad_pcb').write_text('untouched source')
+    (project/'keyboard.kicad_pcb').write_text('(kicad_pcb) ;untouched source')
     (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
     calls=[]
     def worker(bridge,request,*args,**kwargs):
         calls.append((bridge,request))
-        return dict(provisional_only=True,accepted_final=False,saved_trial=False,
+        return dict(generation_profile=request.get('generation_profile','native'),provisional_only=True,accepted_final=False,saved_trial=False,
                     before={'signal':1},after={'signal':1})
     monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('ordinary.py'),routing_transaction=None))
     monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=worker,rule_checks=None))
@@ -27,7 +28,7 @@ def test_disposable_lookahead_sends_the_selected_quality_to_its_worker(tmp_path,
     assert result is before and calls
     assert calls[0][0].name=='keyboard_lookahead_native.py'
     assert all(request['routing_quality']=='turns' for _,request in calls)
-    assert (project/'keyboard.kicad_pcb').read_text()=='untouched source'
+    assert (project/'keyboard.kicad_pcb').read_text()=='(kicad_pcb) ;untouched source'
 
 
 def native_entrypoint(tmp_path):
@@ -36,7 +37,7 @@ def native_entrypoint(tmp_path):
     source=Path(__file__).resolve().parents[1]/'smilepcb/keyboard_lookahead_native.py'
     parsed=ast.parse(source.read_text(),filename=str(source))
     functions=ast.Module(body=[node for node in parsed.body if isinstance(node,ast.FunctionDef)],type_ignores=[])
-    board=tmp_path/'keyboard.kicad_pcb';board.write_text('source')
+    board=tmp_path/'keyboard.kicad_pcb';board.write_text('(kicad_pcb) ;source')
     (tmp_path/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
     observed=[]
     def repair(*args,**kwargs):observed.append(current_quality().name);return {}
@@ -116,14 +117,14 @@ def allocated_trial(tmp_path,depth):
 def test_owned_elastic_allocation_can_use_its_eighth_candidate(tmp_path):
     owned,request,board,source=allocated_trial(tmp_path,7)
     assert owned(request)==(board,source)
-    assert source.read_text()=='source'
+    assert source.read_text()=='(kicad_pcb) ;source'
 
 
 def test_allocation_rejects_policy_and_envelope_mismatch(tmp_path):
     owned,request,_,source=allocated_trial(tmp_path,0)
     with pytest.raises(ValueError):owned({**request,'elastic':False})
     with pytest.raises(ValueError):owned({**request,'gap_ceiling':4})
-    assert source.read_text()=='source'
+    assert source.read_text()=='(kicad_pcb) ;source'
 
 
 def test_elastic_allocation_does_not_authorize_a_ninth_candidate(tmp_path):
@@ -159,7 +160,7 @@ def test_native_provisional_repair_receives_recorded_attempt_history(tmp_path):
 
 def test_provisional_hops_give_untried_nets_a_turn(tmp_path,monkeypatch):
     project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
-    (project/'keyboard.kicad_pcb').write_text('original')
+    (project/'keyboard.kicad_pcb').write_text('(kicad_pcb) ;original')
     (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
     attempted=[];missing={'start':1}
     def worker(_bridge,request,*_args,**_kwargs):
@@ -168,30 +169,30 @@ def test_provisional_hops_give_untried_nets_a_turn(tmp_path,monkeypatch):
         selected=min(('A','B','C'),key=lambda net:(counts.get(net,0),net))
         counts[selected]=counts.get(selected,0)+1;attempted.append(selected)
         before=missing;missing={selected:1}
-        return dict(provisional_only=True,accepted_final=False,saved_trial=True,before=before,after=missing,native_repair={'graph':{'attempt_counts':counts}})
+        return dict(generation_profile=request.get('generation_profile','native'),provisional_only=True,accepted_final=False,saved_trial=True,before=before,after=missing,native_repair={'graph':{'attempt_counts':counts}})
     monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('ordinary.py'),routing_transaction=None))
     monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=worker,rule_checks=None))
     previous={'pad_groups_missing':{'start':1},'pad_group_gaps':1}
     result=run_lookahead(project,out,previous,[],time.perf_counter()+600,lambda *_:None)
     assert attempted==['A','B','C']
-    assert result is previous and (project/'keyboard.kicad_pcb').read_text()=='original'
+    assert result is previous and (project/'keyboard.kicad_pcb').read_text()=='(kicad_pcb) ;original'
 
 
 def test_rejected_provisional_attempt_shares_history_with_ordinary_completion(tmp_path,monkeypatch):
     project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
-    board=project/'keyboard.kicad_pcb';board.write_text('original')
+    board=project/'keyboard.kicad_pcb';board.write_text('(kicad_pcb) ;original')
     (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
     counts={};selected=[]
     def choose(request):
         ledger=dict(request.get('attempt_counts',{}));net=min(('A','B','C'),key=lambda n:(ledger.get(n,0),n));ledger[net]=ledger.get(net,0)+1;selected.append(net);return ledger
-    def ordinary_worker(_bridge,request,*_a,**_k):return {'accepted':False,'graph':{'attempt_counts':choose(request)}}
-    source=Path(__file__).resolve().parents[1]/'recipes/stm32/complete.py'
+    def ordinary_worker(_bridge,request,*_a,**_k):return {'accepted':False,'generation_profile':request['generation_profile'],'graph':{'attempt_counts':choose(request)}}
+    source=Path(__file__).resolve().parents[1]/'smilepcb/stm32/complete.py'
     function=next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.FunctionDef) and n.name=='call')
-    env=dict(counts=counts,worker=ordinary_worker,BRIDGE=Path('bridge.py'),board=board,quality='turns',out=out,time=time,json=json,deadline=time.perf_counter()+600,history=[])
+    env=dict(configured_usb_max_length_nm=configured_usb_max_length_nm,cfg={},counts=counts,worker=ordinary_worker,BRIDGE=Path('bridge.py'),board=board,quality='turns',profile='native',out=out,time=time,json=json,deadline=time.perf_counter()+600,history=[])
     exec(compile(ast.Module(body=[function],type_ignores=[]),str(source),'exec'),env)
     env['call']('complete',tag='first')
     def provisional_worker(_bridge,request,*_a,**_k):
-        return dict(provisional_only=True,accepted_final=False,saved_trial=False,before={'signal':1},after={'signal':1},native_repair={'graph':{'attempt_counts':choose(request)}})
+        return dict(generation_profile=request.get('generation_profile','native'),provisional_only=True,accepted_final=False,saved_trial=False,before={'signal':1},after={'signal':1},native_repair={'graph':{'attempt_counts':choose(request)}})
     monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('bridge.py'),routing_transaction=None))
     monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=provisional_worker,rule_checks=None))
     previous={'pad_groups_missing':{'signal':1},'pad_group_gaps':1}
@@ -199,7 +200,7 @@ def test_rejected_provisional_attempt_shares_history_with_ordinary_completion(tm
     env['call']('complete',tag='last')
     assert selected==['A','B','C']
     assert counts=={'A':1,'B':1,'C':1}
-    assert result is previous and board.read_text()=='original'
+    assert result is previous and board.read_text()=='(kicad_pcb) ;original'
 
 
 def test_recovery_uses_one_attempt_ledger_for_both_provisional_searches(tmp_path,monkeypatch):
@@ -240,3 +241,39 @@ def test_conservative_request_cannot_enable_exploratory_repair(tmp_path):
     env['repair_candidate']=repair
     env['run'](dict(operation='provisional',budget_s=1,depth=0,elastic=False,exploratory=True))
     assert modes==[False]
+
+
+def test_provisional_worker_protects_native_receipt_prerequisites(tmp_path,monkeypatch):
+    from smilepcb.keyboard_routing import field_contract
+    env,_=native_entrypoint(tmp_path);seen=[]
+    contract={'fixture':'receipt'}
+    monkeypatch.setattr(field_contract,'load',lambda project:contract)
+    monkeypatch.setattr(field_contract,'verify_native',lambda board,receipt,**kw:['matrix','led-access'])
+    env['repair_candidate']=lambda *args,**kw:seen.append(set(kw['protected'])) or {}
+    env['run'](dict(operation='provisional',budget_s=1,depth=0,protected_ids=['caller']))
+    assert seen==[{'caller','matrix','led-access'}]
+
+
+def test_process_v2_native_lookahead_activates_and_resets_creation_policy(tmp_path):
+    from smilepcb.keyboard_routing.generation import current_generation_profile
+    env,_=native_entrypoint(tmp_path);observed=[]
+    def repair(*args,**kwargs):observed.append(current_generation_profile().name);return {}
+    env['repair_candidate']=repair
+    result=env['run'](dict(operation='provisional',generation_profile='dsn-process-v2',budget_s=1,depth=0))
+    assert observed==['dsn-process-v2'] and result['generation_profile']=='dsn-process-v2'
+    assert current_generation_profile().name=='native'
+
+
+def test_process_v2_lookahead_forwards_explicit_policy_to_every_worker(tmp_path,monkeypatch):
+    project=tmp_path/'project';project.mkdir();out=tmp_path/'out';out.mkdir()
+    (project/'keyboard.kicad_pcb').write_text('(kicad_pcb) ;source')
+    (project/'.smilepcb-keyboard.json').write_text(json.dumps({'plane_nets':[]}))
+    seen=[]
+    def worker(bridge,request,*args,**kwargs):
+        seen.append(request)
+        return dict(generation_profile=request.get('generation_profile','native'),provisional_only=True,accepted_final=False,saved_trial=False,before={'signal':1},after={'signal':1})
+    monkeypatch.setitem(sys.modules,'smilepcb.keyboard_build',SimpleNamespace(NAME='keyboard',BRIDGE=Path('ordinary.py'),routing_transaction=None))
+    monkeypatch.setitem(sys.modules,'smilepcb.lab_tools',SimpleNamespace(worker=worker,rule_checks=None))
+    previous={'pad_groups_missing':{'signal':1},'pad_group_gaps':1}
+    assert run_lookahead(project,out,previous,[],time.perf_counter()+400,lambda *_:None,generation_profile='dsn-process-v2') is previous
+    assert seen and all(request['generation_profile']=='dsn-process-v2' for request in seen)

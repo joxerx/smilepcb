@@ -4,7 +4,7 @@ from pathlib import Path
 from smilepcb import native_worker as w
 p=w.p
 root=Path(__file__).resolve().parents[1];out=Path(sys.argv[1]);out.mkdir(exist_ok=True,parents=True)
-tree=ast.parse((root/'recipes/stm32/place.py').read_text())
+tree=ast.parse((root/'smilepcb/stm32/place.py').read_text())
 functions=ast.Module(body=[n for n in tree.body if isinstance(n,ast.FunctionDef)],type_ignores=[])
 def v(x,y):return p.VECTOR2I(round(x),round(y))
 def fp(board,ref,xy,back=False):

@@ -24,3 +24,13 @@ def project_settings(profile=None):
             'net_settings':{'classes':[{'name':'Default','clearance':rules['min_clearance'],
                 'track_width':rules['min_track_width'],'via_diameter':rules['min_via_diameter'],
                 'via_drill':rules['min_through_hole_diameter']}]}}
+
+
+def apply_native_rules(board,profile=None):
+    """Apply the same explicit process before placement and native routing."""
+    from smilepcb.native_worker import p
+    values=process_rules(profile);rules=board.GetDesignSettings()
+    for key,attribute in [('min_clearance','m_MinClearance'),('min_copper_edge_clearance','m_CopperEdgeClearance'),('min_track_width','m_TrackMinWidth'),('min_via_annular_width','m_ViasMinAnnularWidth'),('min_via_diameter','m_ViasMinSize'),('min_through_hole_diameter','m_MinThroughDrill')]:
+        setattr(rules,attribute,p.FromMM(values[key]))
+    rules.m_NetSettings.GetDefaultNetclass().SetClearance(p.FromMM(values['min_clearance']))
+    return values

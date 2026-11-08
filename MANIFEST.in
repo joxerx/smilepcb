@@ -1,5 +1,7 @@
-include LICENSE THIRD_PARTY_NOTICES.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md
-recursive-include docs *.md *.json *.png
-recursive-include recipes *.py *.json
+include smilepcb_build_backend.py LICENSE THIRD_PARTY_NOTICES.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md
+recursive-include docs *.md *.json
+recursive-include recipes *.py
+recursive-include smilepcb/stm32 *.json *.md
 recursive-include examples *.json
 recursive-include tests *.py
+prune docs/superpowers

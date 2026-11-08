@@ -36,3 +36,21 @@ jobs:
           python -m pip check
       - name: Build distributions
         run: python -m build
+      - name: Inspect built resources, notices and source archive privacy
+        env:
+          SMILEPCB_DIST_DIR: ${{ github.workspace }}/dist
+        run: python -m pytest -q tests/test_installed_stm32_distribution.py
+      - name: Test installed wheel outside the source checkout
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/smilepcb-installed"
+          for archive in "$GITHUB_WORKSPACE"/dist/*.whl; do
+            "$RUNNER_TEMP/smilepcb-installed/bin/python" -m pip install "$archive[test]"
+          done
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -c "import pathlib,smilepcb; assert pathlib.Path(smilepcb.__file__).resolve().is_relative_to(pathlib.Path('$RUNNER_TEMP/smilepcb-installed'))"
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -m smilepcb.cli build --help
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -m pip check
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -m pytest -q "$GITHUB_WORKSPACE/tests/test_installed_stm32_pipeline.py" -k 'installed_pipeline_reaches or incomplete_finished_stage or normal_cli'
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -m pytest -q "$GITHUB_WORKSPACE/tests/test_installed_stm32_mcp.py" -k 'generation_dispatch_uses or generation_tool_is_advertised'
+          "$RUNNER_TEMP/smilepcb-installed/bin/python" -c "import os,pathlib,smilepcb,pytest,sys; os.environ['SMILEPCB_INSTALLED_TEST_ROOT']=str(pathlib.Path(smilepcb.__file__).resolve().parents[1]); raise SystemExit(pytest.main(['-q','-p','no:cacheprovider',sys.argv[1]]))" "$GITHUB_WORKSPACE/tests/test_installed_stm32_worker_provenance.py"

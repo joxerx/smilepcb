@@ -40,6 +40,17 @@ def load_tools(filename):
 
 
 def configure_kicad(tools, workspace):
+    # Stage only the declared pure parser; host binary packages must not enter
+    # KiCad's different Python runtime. Preserve the module's license bytes.
+    import sexpdata
+    parser_bytes=Path(sexpdata.__file__).read_bytes()
+    parser_directory=Path(workspace).resolve()/'native-python';parser_directory.mkdir(parents=True,exist_ok=True)
+    (parser_directory/'sexpdata.py').write_bytes(parser_bytes)
+    (parser_directory/'manifest.json').write_text(json.dumps({'module':'sexpdata','source_sha256':hashlib.sha256(parser_bytes).hexdigest(),'version':getattr(sexpdata,'__version__',None)},indent=2)+'\n')
+    parser_parent=str(parser_directory)
+    existing=os.environ.get('PYTHONPATH','')
+    entries=existing.split(os.pathsep) if existing else []
+    os.environ['PYTHONPATH']=os.pathsep.join([parser_parent,*[entry for entry in entries if entry!=parser_parent]])
     app=Path(tools['kicad_app'])/'Contents'
     os.environ.update(SMILEPCB_KICAD_APP=tools['kicad_app'],
                       SMILEPCB_KICAD_SUPPORT=str(app/'SharedSupport'),

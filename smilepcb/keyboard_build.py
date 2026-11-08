@@ -27,16 +27,32 @@ def routing_transaction(project, destination, attempt, previous, *, deadline=Non
     if type(score) is not int or score<0:raise ValueError('Invalid native connectivity score')
     accepted=score<previous['pad_group_gaps']
     if accepted:
-        # Schematic, libraries, model and firmware inputs stay in the source
-        # context. Only an improving saved PCB is eligible for replacement.
-        with tempfile.NamedTemporaryFile(dir=project,prefix='.smilepcb-route-',suffix='.tmp',delete=False) as temporary:
-            staged=Path(temporary.name)
+        # PCB, integrity receipt and positive provenance are one revision. Receipts first
+        # fails closed if a process dies between replacements; exceptions
+        # restore all previous bytes, including absent receipt/ledger files.
+        names=['.smilepcb-field.json','.smilepcb-generated.json',NAME+'.kicad_pcb'];project=Path(project)
+        original={name:(project/name).read_bytes() if (project/name).exists() else None for name in names}
+        staged={}
         try:
-            shutil.copyfile(candidate/(NAME+'.kicad_pcb'),staged)
+            for name in names:
+                source=candidate/name
+                if not source.exists():
+                    if original[name] is not None:raise ValueError('Routing candidate lost integrity receipt')
+                    continue
+                with tempfile.NamedTemporaryFile(dir=project,prefix='.smilepcb-route-',suffix='.tmp',delete=False) as temporary:
+                    staged[name]=Path(temporary.name)
+                shutil.copyfile(source,staged[name])
             if deadline is not None and not time.perf_counter()<deadline:
                 raise TimeoutError('Routing promotion exceeded the build budget')
-            os.replace(staged,Path(project)/(NAME+'.kicad_pcb'))
-        finally:staged.unlink(missing_ok=True)
+            for name in names:
+                if name in staged:os.replace(staged[name],project/name)
+        except BaseException:
+            for name,value in original.items():
+                if value is None:(project/name).unlink(missing_ok=True)
+                else:(project/name).write_bytes(value)
+            raise
+        finally:
+            for path in staged.values():path.unlink(missing_ok=True)
     return {'accepted':accepted,'independent':independent if accepted else previous,
             'candidate_independent':independent,'candidate_project':str(candidate)}
 
@@ -118,6 +134,8 @@ def prepare_keyboard(kle_file, config_file, output):
     (output/'model.json').write_text(encode(cfg))
     request = {'operation':'create','board':str((project/(NAME+'.kicad_pcb')).resolve()),'paths':paths,'fields':fields}
     snapshot = worker(BRIDGE,request,output/'create.log')
+    from .keyboard_routing.generated_provenance import record_creation
+    record_creation(project/(NAME+'.kicad_pcb'),{},creator='create-keyboard')
     (output/'snapshot.json').write_text(encode(snapshot))
     from .keyboard_firmware import write_qmk
     write_qmk(project,cfg)
@@ -150,7 +168,8 @@ def build_keyboard(kle_file, config_file, output, tools):
         tick=time.perf_counter()
         if operation in ('components','negotiate'):kwargs['attempt_counts']=dict(route_attempts)
         selected_board=kwargs.pop('board_override',board)
-        data=worker(BRIDGE,{'operation':operation,'board':str(selected_board),**kwargs},output/((tag or operation)+'.log'),timeout_s=remaining())
+        from .keyboard_routing.generated_provenance import tracked_worker
+        data=tracked_worker(worker,BRIDGE,{'operation':operation,'board':str(selected_board),**kwargs},output/((tag or operation)+'.log'),timeout_s=remaining(kwargs.get('budget_s',82)+8 if operation=='joint_repair' else 90))
         remaining()
         graph=data.get('graph',data.get('diagnostic',{}))
         route_attempts.update(graph.get('attempt_counts',{}))
