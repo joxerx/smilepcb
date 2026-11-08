@@ -9,7 +9,7 @@ cover the earlier `fc08beec` runtime only; they do not qualify this version.
 
 ## External tools
 
-Use Python3.11+, KiCad10.0.7 on macOS arm64, Java25, Freerouting2.5.0, QMK CLI1.1.8,
+Use Python 3.11+, KiCad 10.0.7 on macOS arm64, Java 25, Freerouting 2.5.0, QMK CLI 1.1.8,
 ARM GCC and `dfu-suffix`. Native support on other platforms is unqualified.
 Tool provisioning is explicit; no native application, compiler or donor CAD is
 bundled or downloaded automatically. The installed command accepts a tools JSON
@@ -37,7 +37,7 @@ f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7
 ```
 
 Provision [KiCad](https://www.kicad.org/download/),
-[Freerouting2.5.0](https://github.com/freerouting/freerouting/releases/tag/v2.5.0)
+[Freerouting 2.5.0](https://github.com/freerouting/freerouting/releases/tag/v2.5.0)
 and [QMK](https://docs.qmk.fm/newbs_getting_started) separately. The recorded QMK
 source is `98e65cf3e1fb4bf61367d469a62d3cce0a9fac20`; initialize its pinned
 submodules. Firmware receipts fingerprint the actual runtime files. A Git-less
@@ -132,7 +132,7 @@ fixed and checked again. RGB, power, ground and bounded recovery consume that
 same contract. A matrix-only result is not a finished board.
 
 The final gate requires native ERC/DRC, schematic parity, native unconnected0,
-independent pad-group gaps0, two copper layers and clean matching QMK. Only then
+independent pad-group gaps 0, two copper layers and clean matching QMK. Only then
 is the top-level `result.json` written with `complete:true` and
 `fresh_from_kle:true`. Failed runs retain intermediate diagnostics and
 `failure.json`. The accepted KiCad project and firmware/check receipts are under

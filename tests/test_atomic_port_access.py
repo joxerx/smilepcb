@@ -1,7 +1,7 @@
 """Independent behavioral regression: source-cap clearance before lattice entry.
 
 Run from the SmilePCB checkout:
-    PYTHONDONTWRITEBYTECODE=1 python -m pytest -q /private/tmp/test_atomic_port_access_readonly.py
+    PYTHONDONTWRITEBYTECODE=1 python -m pytest -q tests/test_atomic_port_access.py
 
 Uses production grid_search and PortPolicy methods, but never imports KiCad.
 The synthetic collision graph has one physically legal L-shaped path. Track

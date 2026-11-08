@@ -25,6 +25,14 @@ quality. The implementation uses geometric cost, physical corridor capacity,
 preferred matrix faces and native collision/contact checks. It contains no
 per-layout manual route coordinates for the qualified inputs.
 
+## Search and proof budgets
+
+Local recovery shares one absolute deadline between route search and fresh
+connectivity proof. Search leaves a proof reserve; reaching a search cutoff
+never counts as a successful connection. Physical pad roles and geometry
+determine restoration order, while native IDs bind the evidence. Rejected
+changes must roll back, and global contact/connectivity checks still apply.
+
 ## USB and layer transitions
 
 General matrix/RGB/power routing may use through vias on the two copper layers.
@@ -42,8 +50,10 @@ placements, rather than manually chosen successful checkpoints. Check final
 ERC/DRC/parity, saved-board connectivity, preserved key/LED centres and matching
 clean firmware receipts. A locally accepted placement is not a completed PCB.
 
-The 0.3.0 repeat cohort is being finalized before publication. Its scope is
-ANSI61 and Compact68 with RGB, two copper layers and the pinned toolchain.
+The [0.3.0 report](qualification/0.3.0.json) records one fresh complete build
+for each of ANSI61 and Compact68 with RGB, two copper layers and the pinned
+toolchain. Both retain the matrix field through final cleanup and pass the
+same native rule profile and independent saved-board checks.
 Arbitrary layouts, dense 40% fixed-outline controller placement and ANSI104 RGB
 are outside that qualification scope. Exact geometry and timing can vary with
 search deadlines and native IDs; repeated success is not universal proof.

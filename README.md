@@ -14,10 +14,24 @@ profile with straight row trunks, vertical/45-degree columns on the opposite
 copper face, and grouped controller approaches. See the
 [routing guide](docs/reference-style-routing.md) for the profile and limits.
 
-**Release qualification is being repeated before publication.** The final
-0.3.0 report will describe only the completed ANSI61 and Compact68 RGB cohort.
-The older [0.2.0rc1 report](docs/qualification/0.2.0rc1.json) qualifies its own
-runtime only. Software checks do not establish fabricated-hardware validation.
+[0.3.0 qualification](docs/qualification/0.3.0.json) records fresh ANSI61 and
+Compact68 RGB builds: ERC/DRC, schematic parity, physical pad-group gaps and
+warnings are zero under the documented rule profile; matching QMK builds cleanly.
+The matrix field is preserved through completion.
+
+| Fresh full build | Wall time | Sampled aggregate peak RSS |
+| --- | ---: | ---: |
+| ANSI61 RGB | 17 min 54 s | 1.23 GB |
+| Compact68 RGB | 18 min 50 s | 1.42 GB |
+
+Each measurement includes rejected automatic placements, routing, cleanup and
+QMK. One-second memory sampling may miss shorter peaks. These are two fixture
+results, not a completion guarantee or a controlled speed comparison with
+0.2.0rc1. Software checks do not establish fabricated-hardware validation.
+
+Actual copper on both faces and controller details: [ANSI61](docs/qualification/0.3.0-ansi61.png),
+[Compact68](docs/qualification/0.3.0-compact68.png). Fills are hidden for inspection;
+via and ground connections can continue on the other face or through those pours.
 
 ## Install
 

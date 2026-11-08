@@ -2,7 +2,7 @@
 
 Changes are recorded here and on the GitHub Releases page.
 
-## 0.3.0 — release preparation
+## 0.3.0 — 2026-11-09
 
 - Package the complete KLE-to-STM32 coordinator, native stage workers and input
   resources in both wheel and source distribution; retain source recipe wrappers.
@@ -12,10 +12,13 @@ Changes are recorded here and on the GitHub Releases page.
   retain actual contact/clearance checks across bounded local recovery.
 - Reserve placement refinement time and distribute interrupted search samples
   across physical space instead of exhausting one narrow prefix.
+- Reserve fresh connectivity-proof time inside local recovery deadlines and
+  restore displaced connections in physical pad order; keep exact rollback.
 - Expose the same generator through bounded, serialized CLI/MCP jobs with
   cancellation cleanup and explicit input/output/tool paths.
-- Repeat full ANSI61/Compact68 RGB qualification before publication. Dense 40%
-  and ANSI104 RGB remain outside the qualified scope; no hardware test is claimed.
+- Qualify fresh ANSI61/Compact68 RGB builds through zero native checks and
+  matching clean QMK; include whole-command time and aggregate memory receipts.
+  Dense 40% and ANSI104 RGB remain outside this scope; no hardware test is claimed.
 - Preserve existing licenses, public source attribution and the documented
   five-category DRC rule scope.
 
